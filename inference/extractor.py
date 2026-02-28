@@ -18,10 +18,21 @@ _local_dir = Path(__file__).resolve().parent.parent
 gpu_image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install(
+        # GPU inference deps
         "transformers>=4.45.0",
         "torch>=2.5.0",
         "accelerate>=0.26.0",
         "sentencepiece>=0.2.0",
+        # CPU deps required by the app.py import chain (api.py → models.py, resolvers, etc.)
+        "pydantic~=2.9",
+        "fastapi[standard]~=0.115",
+        "networkx~=3.3",
+        "requests~=2.32",
+        "httpx[http2]~=0.27",
+        "aiohttp~=3.11",
+        "beautifulsoup4~=4.12",
+        "dnspython~=2.7",
+        "lxml~=5.3",
     )
     .env({"PYTHONPATH": "/root/osint_recon"})
     .add_local_dir(_local_dir, remote_path="/root/osint_recon")

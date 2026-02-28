@@ -4,12 +4,13 @@ Main scan loop: named Queue + Dict by scan_id, fan-out to resolvers, build graph
 
 import time
 import traceback
+import uuid
 from typing import Any
 
 import modal
 
 from app import app, image, osint_secret
-from graph import NODE_PREFIX, SEEN_PREFIX, build_from_dict
+from graph import EDGES_BATCH_PREFIX, NODE_PREFIX, SEEN_PREFIX, build_from_dict
 from models import Entity, EntityType, ScanConfig, ScanStatus
 from stream import write_stream_event
 
@@ -161,6 +162,72 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 snapshot[k] = d[k]
             except Exception:
                 pass
+
+        # GPU post-processing: extract entities from node metadata text
+        try:
+            from inference.extractor import EntityExtractor
+            extractor = EntityExtractor()
+            for k, v in list(snapshot.items()):
+                if not k.startswith(NODE_PREFIX) or not isinstance(v, dict):
+                    continue
+                meta = v.get("metadata", {}) or {}
+                # Collect string values from metadata (exclude the node's own value to avoid self-extraction)
+                node_value = v.get("value", "").strip().lower()
+                text_parts: list[str] = []
+                for mval in meta.values():
+                    if isinstance(mval, str) and len(mval) > 4 and mval.strip().lower() != node_value:
+                        text_parts.append(mval)
+                    elif isinstance(mval, list):
+                        text_parts.extend(
+                            s for s in mval
+                            if isinstance(s, str) and len(s) > 4 and s.strip().lower() != node_value
+                        )
+                text = " ".join(text_parts).strip()
+                if len(text) < 20:
+                    continue
+                try:
+                    extracted = extractor.extract_entities.remote(text)
+                except Exception:
+                    continue
+                source_node_id = v.get("id", k[len(NODE_PREFIX):])
+                node_depth = v.get("depth", 0) + 1
+                new_edges: list[dict[str, Any]] = []
+                for etype, vals in [
+                    (EntityType.EMAIL.value, extracted.get("emails", [])),
+                    (EntityType.USERNAME.value, extracted.get("usernames", [])),
+                    (EntityType.DOMAIN.value, extracted.get("domains", [])),
+                ]:
+                    for val in vals:
+                        val = (val or "").strip()
+                        if not val:
+                            continue
+                        ek = _entity_key(etype, val)
+                        if ek == source_node_id:
+                            continue  # skip self-referential edges
+                        nk = f"{NODE_PREFIX}{ek}"
+                        if nk not in snapshot:
+                            new_node: dict[str, Any] = {
+                                "id": ek,
+                                "type": etype,
+                                "value": val,
+                                "metadata": {"source": "gpu_extractor"},
+                                "depth": node_depth,
+                            }
+                            snapshot[nk] = new_node
+                            write_stream_event(scan_id, "node", new_node)
+                        new_edges.append({
+                            "source": source_node_id,
+                            "target": ek,
+                            "relationship": "extracted_by_gpu",
+                            "confidence": 0.8,
+                        })
+                if new_edges:
+                    snapshot[f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"] = new_edges
+                    for edge in new_edges:
+                        write_stream_event(scan_id, "edge", edge)
+        except Exception:
+            pass  # GPU extraction is best-effort; don't fail the scan
+
         graph_payload = build_from_dict(snapshot)
 
         scan_results[scan_id] = {
