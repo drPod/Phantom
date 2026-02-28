@@ -144,11 +144,13 @@ def enumerate_username(
     entity_type: str,
     depth: int,
     source_entity_key: str,
-    q: modal.Queue,
-    d: modal.Dict,
     scan_id: str = "",
 ) -> None:
     """Enumerate a username across ~600 sites via the WhatsMyName dataset."""
+    if not scan_id:
+        return
+    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
+    d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
     username = (entity_value or "").strip()

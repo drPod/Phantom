@@ -167,4 +167,28 @@ def fastapi_app() -> Any:
             },
         )
 
+
+    @web_app.get("/debug/{scan_id}")
+    def debug_scan(scan_id: str):
+        """Return raw dict contents for debugging a stuck scan."""
+        out = {}
+        try:
+            sr = modal.Dict.from_name("osint-scan-results", create_if_missing=True)
+            out["scan_results"] = dict(sr.get(scan_id, {}))
+        except Exception as e:
+            out["scan_results_error"] = str(e)
+        try:
+            d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
+            keys = list(d.keys())
+            out["dict_keys"] = keys
+            out["dict_key_count"] = len(keys)
+        except Exception as e:
+            out["dict_error"] = str(e)
+        try:
+            q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
+            out["queue_info"] = "ok"
+        except Exception as e:
+            out["queue_error"] = str(e)
+        return out
+
     return web_app

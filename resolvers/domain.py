@@ -50,11 +50,13 @@ def resolve_domain(
     entity_type: str,
     depth: int,
     source_entity_key: str,
-    q: modal.Queue,
-    d: modal.Dict,
     scan_id: str = "",
 ) -> None:
     """Resolve a domain via crt.sh, WhoisXML, DNS lookups, and SecurityTrails."""
+    if not scan_id:
+        return
+    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
+    d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
     domain = (entity_value or "").strip().lower()

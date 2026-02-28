@@ -42,11 +42,13 @@ def resolve_breach(
     entity_type: str,
     depth: int,
     source_entity_key: str,
-    q: modal.Queue,
-    d: modal.Dict,
     scan_id: str = "",
 ) -> None:
     """Search breach databases for an email or username."""
+    if not scan_id:
+        return
+    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
+    d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
     value = (entity_value or "").strip()
