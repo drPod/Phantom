@@ -36,6 +36,32 @@ def _backoff(attempt: int, retry_after: int | None = None) -> None:
 
 
 @app.function(image=image, secrets=[osint_secret])
+def _gpu_extract_github_bio(bio: str, scan_id: str, source_node_id: str, depth: int) -> None:
+    """Extract entities from a GitHub bio using the GPU EntityExtractor and push to queue."""
+    try:
+        from inference.extractor import EntityExtractor
+        result = EntityExtractor().extract_entities.remote(bio)
+        q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
+        for email in (result.get("emails") or []):
+            email = str(email).strip().lower()
+            if "@" in email:
+                q.put({"type": EntityType.EMAIL.value, "value": email, "source": "gpu_extract",
+                       "confidence": 0.8, "depth": depth + 1, "parent_key": source_node_id})
+        for uname in (result.get("usernames") or []):
+            uname = str(uname).strip().lower()
+            if uname:
+                q.put({"type": EntityType.USERNAME.value, "value": uname, "source": "gpu_extract",
+                       "confidence": 0.7, "depth": depth + 1, "parent_key": source_node_id})
+        for domain in (result.get("domains") or []):
+            domain = str(domain).strip().lower()
+            if domain and "." in domain:
+                q.put({"type": EntityType.DOMAIN.value, "value": domain, "source": "gpu_extract",
+                       "confidence": 0.7, "depth": depth + 1, "parent_key": source_node_id})
+    except Exception:
+        pass
+
+
+@app.function(image=image, secrets=[osint_secret])
 @modal.concurrent(max_inputs=10)
 def resolve_github(
     entity_value: str,
@@ -169,3 +195,11 @@ def resolve_github(
 
     for item in to_push:
         q.put(item)
+
+    # Non-blocking GPU bio extraction — spawn so resolver returns immediately
+    bio = (data.get("bio") or "").strip()
+    if bio:
+        try:
+            _gpu_extract_github_bio.spawn(bio, scan_id, node_id, depth)
+        except Exception:
+            pass
