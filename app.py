@@ -13,12 +13,14 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install(
         "requests~=2.32",
-        "httpx~=0.27",
+        "httpx[http2]~=0.27",
         "aiohttp~=3.11",
         "beautifulsoup4~=4.12",
         "networkx~=3.3",
         "pydantic~=2.9",
         "fastapi[standard]~=0.115",
+        "dnspython~=2.7",
+        "lxml~=5.3",
     )
     .env({"PYTHONPATH": "/root/osint_recon"})
     .add_local_dir(_local_dir, remote_path="/root/osint_recon")
@@ -36,3 +38,10 @@ app = modal.App(
 import api  # noqa: F401
 import orchestrator  # noqa: F401
 import resolvers.username  # noqa: F401
+import resolvers.email  # noqa: F401
+import resolvers.domain  # noqa: F401
+import resolvers.username_enum  # noqa: F401
+import resolvers.github_deep  # noqa: F401
+import resolvers.breach  # noqa: F401
+import resolvers.social  # noqa: F401
+import inference.extractor  # noqa: F401
