@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PHANTOM — OSINT Intelligence</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0e1a;
+      --bg2:       #0d1526;
+      --bg3:       #111d35;
+      --border:    #1a2744;
+      --border2:   #243558;
+      --text:      #c8d8f0;
+      --text2:     #5a7a9a;
+      --accent:    #4A9EFF;
+      --success:   #50C878;
+      --error:     #FF4444;
+      --warn:      #FF8C42;
+      --glow:      rgba(74,158,255,0.15);
+      --font:      'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── layout ─────────────────────────────────────────────────── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* ── top bar ────────────────────────────────────────────────── */
+    #topbar {
+      flex: 0 0 auto;
+      height: 46px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 12px;
+    }
+
+    #logo {
+      font-size: 18px;
+      font-weight: bold;
+      letter-spacing: 6px;
+      color: var(--accent);
+      text-shadow: 0 0 14px rgba(74,158,255,0.6);
+    }
+
+    #logo-sub {
+      font-size: 10px;
+      color: var(--text2);
+      letter-spacing: 3px;
+      margin-top: 1px;
+    }
+
+    .topbar-spacer { flex: 1; }
+
+    #sse-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text2);
+      letter-spacing: 1px;
+    }
+
+    #sse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text2);
+      transition: background 0.3s;
+    }
+    #sse-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    #sse-dot.error     { background: var(--error);   box-shadow: 0 0 6px var(--error); }
+    #sse-dot.idle      { background: var(--text2); }
+
+    /* ── input row ──────────────────────────────────────────────── */
+    #input-row {
+      flex: 0 0 auto;
+      height: 50px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 10px;
+    }
+
+    #seed-input {
+      flex: 1;
+      max-width: 420px;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      padding: 7px 12px;
+      border-radius: 3px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #seed-input:focus { border-color: var(--accent); }
+    #seed-input::placeholder { color: var(--text2); }
+
+    #seed-type {
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 7px 10px;
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+      letter-spacing: 1px;
+    }
+    #seed-type option { background: var(--bg2); }
+
+    #scan-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      padding: 8px 22px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: opacity 0.2s, box-shadow 0.2s;
+    }
+    #scan-btn:hover  { opacity: 0.85; box-shadow: 0 0 12px rgba(74,158,255,0.5); }
+    #scan-btn:active { opacity: 0.7; }
+    #scan-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── main area ──────────────────────────────────────────────── */
+    #main {
+      flex: 1 1 auto;
+      display: flex;
+      overflow: hidden;
+    }
+
+    #graph-wrap {
+      flex: 1 1 auto;
+      position: relative;
+      overflow: hidden;
+      background: var(--bg);
+      background-image: radial-gradient(circle, #1a2744 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    #graph {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #tooltip {
+      position: absolute;
+      display: none;
+      background: rgba(10,14,26,0.92);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 5px 10px;
+      border-radius: 3px;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 100;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── right sidebar ──────────────────────────────────────────── */
+    #sidebar {
+      flex: 0 0 260px;
+      background: var(--bg2);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: flex-basis 0.2s;
+    }
+    #sidebar.collapsed { flex-basis: 0; }
+
+    #sidebar-header {
+      flex: 0 0 auto;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #sidebar-title {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: var(--accent);
+    }
+
+    #sidebar-close {
+      background: none;
+      border: none;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    #sidebar-close:hover { color: var(--text); }
+
+    #sidebar-body {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 12px 14px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border2) transparent;
+    }
+
+    .detail-type-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 2px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .detail-value {
+      font-size: 13px;
+      color: var(--text);
+      word-break: break-all;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .detail-kv { margin-bottom: 6px; }
+    .detail-key { color: var(--text2); font-size: 10px; letter-spacing: 1px; }
+    .detail-val { color: var(--text); font-size: 12px; word-break: break-all; }
+
+    /* ── stats bar ──────────────────────────────────────────────── */
+    #statsbar {
+      flex: 0 0 auto;
+      height: 38px;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 24px;
+      font-size: 11px;
+      color: var(--text2);
+      letter-spacing: 1px;
+    }
+
+    .stat-item span { color: var(--text); }
+
+    #export-btn {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--success);
+      color: var(--success);
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 2px;
+      padding: 4px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #export-btn:hover { background: rgba(80,200,120,0.12); }
+
+    /* ── D3 graph styles ────────────────────────────────────────── */
+    .link {
+      stroke-opacity: 0.55;
+      stroke-width: 1.4;
+      fill: none;
+    }
+
+    .node-circle {
+      stroke-width: 1;
+      stroke: rgba(255,255,255,0.2);
+      cursor: pointer;
+      transition: stroke 0.15s;
+    }
+    .node-circle:hover { stroke: #fff; stroke-width: 1.5; }
+
+    .node-label {
+      fill: #8aaccc;
+      font-family: var(--font);
+      font-size: 10px;
+      pointer-events: none;
+      text-anchor: middle;
+    }
+
+    .node-new .node-circle {
+      animation: node-pop 0.4s ease-out forwards;
+    }
+    @keyframes node-pop {
+      0%   { r: 0; opacity: 0; }
+      60%  { r: calc(var(--r) * 1.25); opacity: 1; }
+      100% { r: var(--r); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── top bar ──────────────────────────────────────────────────── -->
+  <div id="topbar">
+    <div>
+      <div id="logo">PHANTOM</div>
+      <div id="logo-sub">OSINT INTELLIGENCE</div>
+    </div>
+    <div class="topbar-spacer"></div>
+    <div id="sse-wrap">
+      <div id="sse-dot" class="idle"></div>
+      <span id="sse-label">IDLE</span>
+    </div>
+  </div>
+
+  <!-- ── input row ────────────────────────────────────────────────── -->
+  <div id="input-row">
+    <input id="seed-input" type="text" placeholder="target identifier (username, email, domain…)" spellcheck="false" />
+    <select id="seed-type">
+      <option value="username">USERNAME</option>
+      <option value="email">EMAIL</option>
+      <option value="domain">DOMAIN</option>
+      <option value="phone">PHONE</option>
+      <option value="wallet">WALLET</option>
+    </select>
+    <button id="scan-btn">SCAN</button>
+  </div>
+
+  <!-- ── main ─────────────────────────────────────────────────────── -->
+  <div id="main">
+    <div id="graph-wrap">
+      <svg id="graph"></svg>
+      <div id="tooltip"></div>
+    </div>
+
+    <div id="sidebar" class="collapsed">
+      <div id="sidebar-header">
+        <div id="sidebar-title">NODE DETAILS</div>
+        <button id="sidebar-close">×</button>
+      </div>
+      <div id="sidebar-body"></div>
+    </div>
+  </div>
+
+  <!-- ── stats bar ────────────────────────────────────────────────── -->
+  <div id="statsbar">
+    <span class="stat-item">ENTITIES: <span id="stat-entities">0</span></span>
+    <span class="stat-item">DEPTH: <span id="stat-depth">0</span></span>
+    <span class="stat-item">ELAPSED: <span id="stat-elapsed">—</span></span>
+    <span class="stat-item" style="color:#3a4f6a;">SCAN: <span id="stat-scanid" style="color:#3a4f6a;">—</span></span>
+    <button id="export-btn" style="display:none">⬇ EXPORT JSON</button>
+  </div>
+
+</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════════
+//  CONFIG
+// ════════════════════════════════════════════════════════════════════
+const API_BASE_URL = '';
+
+const NODE_COLORS = {
+  username: '#4A9EFF',
+  email:    '#FF8C42',
+  domain:   '#50C878',
+  ip:       '#FF4444',
+  phone:    '#9B59B6',
+  wallet:   '#F1C40F',
+  default:  '#7f8fa6',
+};
+
+function nodeColor(d) {
+  return NODE_COLORS[d.type] || NODE_COLORS.default;
+}
+
+function nodeRadius(d) {
+  if (d.id === 'seed' || d.metadata?.seed) return 28;
+  const depth = d.depth || 0;
+  if (depth === 0) return 24;
+  if (depth === 1) return 18;
+  if (depth === 2) return 14;
+  return 10;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════════════
+let eventSource   = null;
+let currentScanId = null;
+let startTime     = null;
+let elapsedTimer  = null;
+let graphData     = null;  // stored for export
+
+const nodesMap = new Map();   // id → node obj
+let   nodes    = [];
+let   links    = [];
+
+// ════════════════════════════════════════════════════════════════════
+//  D3 SETUP
+// ════════════════════════════════════════════════════════════════════
+const wrap = document.getElementById('graph-wrap');
+const svgEl = document.getElementById('graph');
+
+const svg = d3.select(svgEl);
+const g   = svg.append('g');
+
+// ── defs (arrow markers + glow filter) ──────────────────────────────
+const defs = svg.append('defs');
+
+// Glow filter
+const glowFilter = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+glowFilter.append('feGaussianBlur').attr('stdDeviation', '3.5').attr('result', 'blur');
+const feMerge = glowFilter.append('feMerge');
+feMerge.append('feMergeNode').attr('in', 'blur');
+feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+// Arrow markers per node type
+Object.entries(NODE_COLORS).forEach(([type, color]) => {
+  defs.append('marker')
+    .attr('id',          `arrow-${type}`)
+    .attr('viewBox',     '0 -5 10 10')
+    .attr('refX',        26)
+    .attr('refY',        0)
+    .attr('markerWidth', 6)
+    .attr('markerHeight',6)
+    .attr('orient',      'auto')
+    .append('path')
+    .attr('d',    'M0,-5L10,0L0,5')
+    .attr('fill', color)
+    .attr('fill-opacity', 0.65);
+});
+
+// ── layers ───────────────────────────────────────────────────────────
+const linkLayer = g.append('g').attr('class', 'link-layer');
+const nodeLayer = g.append('g').attr('class', 'node-layer');
+
+// ── simulation ───────────────────────────────────────────────────────
+function getSize() {
+  return { w: wrap.clientWidth, h: wrap.clientHeight };
+}
+
+const simulation = d3.forceSimulation()
+  .force('link',    d3.forceLink().id(d => d.id).strength(0.3).distance(110))
+  .force('charge',  d3.forceManyBody().strength(-320))
+  .force('collide', d3.forceCollide().radius(d => nodeRadius(d) + 7))
+  .force('center',  d3.forceCenter())
+  .alphaDecay(0.025)
+  .on('tick', ticked);
+
+function resetCenter() {
+  const { w, h } = getSize();
+  simulation.force('center', d3.forceCenter(w / 2, h / 2));
+}
+resetCenter();
+
+// ── zoom / pan ───────────────────────────────────────────────────────
+const zoom = d3.zoom()
+  .scaleExtent([0.08, 8])
+  .on('zoom', e => g.attr('transform', e.transform));
+svg.call(zoom);
+
+window.addEventListener('resize', () => {
+  resetCenter();
+  simulation.alpha(0.1).restart();
+});
+
+// ── tooltip ──────────────────────────────────────────────────────────
+const tooltip = document.getElementById('tooltip');
+
+function showTooltip(event, text) {
+  tooltip.style.display = 'block';
+  tooltip.style.left    = (event.pageX + 12) + 'px';
+  tooltip.style.top     = (event.pageY - 32) + 'px';
+  tooltip.textContent   = text;
+}
+function hideTooltip() { tooltip.style.display = 'none'; }
+
+// ════════════════════════════════════════════════════════════════════
+//  GRAPH RENDER
+// ════════════════════════════════════════════════════════════════════
+let linkSel = linkLayer.selectAll('line');
+let nodeSel = nodeLayer.selectAll('g.node');
+
+function updateGraph() {
+  // ── links ──────────────────────────────────────────────────────────
+  linkSel = linkLayer.selectAll('line').data(links, d => `${d.source?.id || d.source}-${d.target?.id || d.target}`);
+
+  linkSel.exit().remove();
+
+  const linkEnter = linkSel.enter().append('line')
+    .attr('class', 'link')
+    .attr('stroke', d => {
+      const srcType = typeof d.source === 'object' ? d.source.type : 'default';
+      return NODE_COLORS[srcType] || NODE_COLORS.default;
+    })
+    .attr('marker-end', d => {
+      const srcType = typeof d.source === 'object' ? d.source.type : 'default';
+      return `url(#arrow-${srcType in NODE_COLORS ? srcType : 'default'})`;
+    })
+    .on('mouseover', (event, d) => {
+      showTooltip(event, d.relationship || 'linked_to');
+    })
+    .on('mouseout', hideTooltip);
+
+  linkSel = linkEnter.merge(linkSel);
+
+  // ── nodes ──────────────────────────────────────────────────────────
+  nodeSel = nodeLayer.selectAll('g.node').data(nodes, d => d.id);
+
+  nodeSel.exit().remove();
+
+  const nodeEnter = nodeSel.enter().append('g')
+    .attr('class', 'node node-new')
+    .call(
+      d3.drag()
+        .on('start', dragStarted)
+        .on('drag',  dragged)
+        .on('end',   dragEnded)
+    )
+    .on('click', (event, d) => {
+      event.stopPropagation();
+      showSidebar(d);
+    });
+
+  nodeEnter.append('circle')
+    .attr('class', 'node-circle')
+    .attr('r',    d => nodeRadius(d))
+    .attr('fill', d => nodeColor(d))
+    .attr('filter', 'url(#glow)')
+    .attr('stroke', d => nodeColor(d))
+    .attr('stroke-width', 1.5)
+    .attr('stroke-opacity', 0.5);
+
+  nodeEnter.append('text')
+    .attr('class', 'node-label')
+    .attr('dy', d => nodeRadius(d) + 13)
+    .text(d => {
+      const v = d.value || d.id;
+      return v.length > 18 ? v.slice(0, 16) + '…' : v;
+    });
+
+  // Remove 'node-new' class after animation
+  nodeEnter.each(function() {
+    const el = this;
+    setTimeout(() => el.classList.remove('node-new'), 450);
+  });
+
+  nodeSel = nodeEnter.merge(nodeSel);
+
+  // restart
+  simulation.nodes(nodes);
+  simulation.force('link').links(links);
+  simulation.alpha(0.3).restart();
+}
+
+function ticked() {
+  const { w, h } = getSize();
+
+  linkSel
+    .attr('x1', d => d.source.x)
+    .attr('y1', d => d.source.y)
+    .attr('x2', d => {
+      const r   = nodeRadius(d.target);
+      const dx  = d.target.x - d.source.x;
+      const dy  = d.target.y - d.source.y;
+      const len = Math.sqrt(dx*dx + dy*dy) || 1;
+      return d.target.x - (dx / len) * (r + 2);
+    })
+    .attr('y2', d => {
+      const r   = nodeRadius(d.target);
+      const dx  = d.target.x - d.source.x;
+      const dy  = d.target.y - d.source.y;
+      const len = Math.sqrt(dx*dx + dy*dy) || 1;
+      return d.target.y - (dy / len) * (r + 2);
+    });
+
+  nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+function dragStarted(event, d) {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x;
+  d.fy = d.y;
+}
+function dragged(event, d) {
+  d.fx = event.x;
+  d.fy = event.y;
+}
+function dragEnded(event, d) {
+  if (!event.active) simulation.alphaTarget(0);
+  d.fx = null;
+  d.fy = null;
+}
+
+// dismiss sidebar on svg click
+svg.on('click', () => collapseSidebar());
+
+// ════════════════════════════════════════════════════════════════════
+//  SIDEBAR
+// ════════════════════════════════════════════════════════════════════
+const sidebar      = document.getElementById('sidebar');
+const sidebarBody  = document.getElementById('sidebar-body');
+const sidebarClose = document.getElementById('sidebar-close');
+
+sidebarClose.addEventListener('click', collapseSidebar);
+
+function collapseSidebar() {
+  sidebar.classList.add('collapsed');
+}
+
+function showSidebar(d) {
+  sidebar.classList.remove('collapsed');
+  const color = nodeColor(d);
+  const type  = (d.type || 'unknown').toUpperCase();
+
+  let html = `<span class="detail-type-badge" style="background:${color}22;color:${color};border:1px solid ${color}44;">${type}</span>`;
+  html += `<div class="detail-value">${escHtml(d.value || d.id)}</div>`;
+  html += `<div class="detail-kv"><div class="detail-key">ID</div><div class="detail-val">${escHtml(d.id)}</div></div>`;
+  html += `<div class="detail-kv"><div class="detail-key">DEPTH</div><div class="detail-val">${d.depth ?? 0}</div></div>`;
+
+  const meta = d.metadata || {};
+  for (const [k, v] of Object.entries(meta)) {
+    if (v === null || v === undefined || v === '') continue;
+    html += `<div class="detail-kv"><div class="detail-key">${escHtml(k.toUpperCase())}</div><div class="detail-val">${escHtml(String(v))}</div></div>`;
+  }
+
+  sidebarBody.innerHTML = html;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  STATS BAR
+// ════════════════════════════════════════════════════════════════════
+const elEntities = document.getElementById('stat-entities');
+const elDepth    = document.getElementById('stat-depth');
+const elElapsed  = document.getElementById('stat-elapsed');
+const elScanId   = document.getElementById('stat-scanid');
+const exportBtn  = document.getElementById('export-btn');
+
+function updateStats(extra = {}) {
+  elEntities.textContent = nodesMap.size;
+  if (extra.depth_reached !== undefined) {
+    elDepth.textContent = extra.depth_reached;
+  }
+  if (extra.status) {
+    const colors = { running: 'var(--accent)', completed: 'var(--success)', failed: 'var(--error)' };
+    elDepth.style.color = colors[extra.status] || '';
+  }
+}
+
+function startElapsedTimer() {
+  if (elapsedTimer) clearInterval(elapsedTimer);
+  startTime = Date.now();
+  elapsedTimer = setInterval(() => {
+    const sec = Math.floor((Date.now() - startTime) / 1000);
+    elElapsed.textContent = sec >= 60
+      ? `${Math.floor(sec/60)}m ${sec%60}s`
+      : `${sec}s`;
+  }, 500);
+}
+
+function stopElapsedTimer() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SSE STATUS DOT
+// ════════════════════════════════════════════════════════════════════
+const sseDot   = document.getElementById('sse-dot');
+const sseLabel = document.getElementById('sse-label');
+
+function setSseStatus(state) {
+  sseDot.className = `idle`;
+  if (state === 'connected') {
+    sseDot.className = 'connected';
+    sseLabel.textContent = 'CONNECTED';
+  } else if (state === 'error') {
+    sseDot.className = 'error';
+    sseLabel.textContent = 'RECONNECTING';
+  } else {
+    sseLabel.textContent = 'IDLE';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SCAN LOGIC
+// ════════════════════════════════════════════════════════════════════
+document.getElementById('scan-btn').addEventListener('click', startScan);
+document.getElementById('seed-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startScan();
+});
+
+function startScan() {
+  const seed = document.getElementById('seed-input').value.trim();
+  const type = document.getElementById('seed-type').value;
+  if (!seed) return;
+
+  // Reset graph
+  nodesMap.clear();
+  nodes = [];
+  links = [];
+  updateGraph();
+  collapseSidebar();
+  exportBtn.style.display = 'none';
+  document.getElementById('scan-btn').disabled = true;
+  elEntities.textContent = '0';
+  elDepth.textContent    = '0';
+  elElapsed.textContent  = '0s';
+  elScanId.textContent   = '…';
+  startElapsedTimer();
+
+  fetch(API_BASE_URL + '/scan', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ seed: { type, value: seed } }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      currentScanId = data.scan_id;
+      elScanId.textContent = currentScanId.slice(0, 8) + '…';
+      openSSE(currentScanId);
+    })
+    .catch(err => {
+      console.error('POST /scan failed:', err);
+      setSseStatus('error');
+      document.getElementById('scan-btn').disabled = false;
+      stopElapsedTimer();
+    });
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SSE
+// ════════════════════════════════════════════════════════════════════
+function openSSE(scanId) {
+  if (eventSource) { eventSource.close(); eventSource = null; }
+
+  setSseStatus('connected');
+  eventSource = new EventSource(API_BASE_URL + '/scan/' + scanId + '/stream');
+
+  eventSource.onmessage = function(event) {
+    let data;
+    try { data = JSON.parse(event.data); }
+    catch { return; }
+    handleEvent(data);
+  };
+
+  eventSource.onerror = function() {
+    setSseStatus('error');
+    eventSource.close();
+    eventSource = null;
+    // Reconnect after 3 s if scan not finished
+    setTimeout(() => {
+      if (currentScanId) openSSE(currentScanId);
+    }, 3000);
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  EVENT HANDLERS
+// ════════════════════════════════════════════════════════════════════
+function handleEvent(data) {
+  if (!data || !data.type) return;
+
+  if (data.type === 'node') {
+    addNode(data.payload);
+  } else if (data.type === 'edge') {
+    addEdge(data.payload);
+  } else if (data.type === 'status') {
+    handleStatus(data.payload);
+  } else if (data.type === 'error') {
+    setSseStatus('error');
+    document.getElementById('scan-btn').disabled = false;
+    stopElapsedTimer();
+  }
+}
+
+function addNode(payload) {
+  if (!payload || !payload.id) return;
+  if (nodesMap.has(payload.id)) return;
+  const node = { ...payload };
+  nodesMap.set(node.id, node);
+  nodes.push(node);
+  updateGraph();
+  updateStats();
+}
+
+function addEdge(payload) {
+  if (!payload || !payload.source || !payload.target) return;
+  // avoid duplicate links
+  const key = `${payload.source}-${payload.target}`;
+  if (links.some(l => `${l.source?.id||l.source}-${l.target?.id||l.target}` === key)) return;
+  links.push({ ...payload });
+  updateGraph();
+}
+
+function handleStatus(payload) {
+  updateStats(payload);
+  const status = payload?.status;
+  if (status === 'completed' || status === 'failed') {
+    stopElapsedTimer();
+    setSseStatus('idle');
+    document.getElementById('scan-btn').disabled = false;
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    if (status === 'completed') {
+      exportBtn.style.display = '';
+      graphData = { nodes, links };
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  EXPORT
+// ════════════════════════════════════════════════════════════════════
+exportBtn.addEventListener('click', () => {
+  if (!graphData) return;
+  const blob = new Blob(
+    [JSON.stringify({ scan_id: currentScanId, nodes: graphData.nodes, links: graphData.links }, null, 2)],
+    { type: 'application/json' }
+  );
+  const a = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `phantom-${currentScanId?.slice(0,8) || 'export'}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>

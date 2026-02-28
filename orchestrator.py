@@ -12,6 +12,7 @@ import modal
 from app import app, image, osint_secret
 from graph import NODE_PREFIX, SEEN_PREFIX, build_from_dict
 from models import Entity, EntityType, ScanConfig, ScanStatus
+from stream import write_stream_event
 
 
 def _entity_key(etype: str, value: str) -> str:
@@ -28,6 +29,12 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
     resolvers, then write result to persistent Dict keyed by scan_id.
     """
     from resolvers import username as username_resolver
+    from resolvers import email as email_resolver
+    from resolvers import domain as domain_resolver
+    from resolvers import username_enum as username_enum_resolver
+    from resolvers import github_deep as github_deep_resolver
+    from resolvers import breach as breach_resolver
+    from resolvers import social as social_resolver
 
     config = ScanConfig.model_validate(config_dict)
     seed = Entity.model_validate(seed_entity)
@@ -39,17 +46,25 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
     # Persistent Dict for this app to store results
     scan_results = modal.Dict.from_name("osint-scan-results", create_if_missing=True)
 
+    write_stream_event(scan_id, "status", {
+        "status": ScanStatus.RUNNING.value,
+        "entities_seen": 0,
+        "depth_reached": 0,
+    })
+
     try:
         with modal.Queue.ephemeral() as q, modal.Dict.ephemeral() as d:
             # Seed node so graph has a root; resolvers add edges from "seed" to first resolved node
-            d[f"{NODE_PREFIX}seed"] = {
+            seed_node: dict[str, Any] = {
                 "id": "seed",
                 "type": seed.type.value,
                 "value": seed.value,
                 "metadata": {"seed": True},
                 "depth": 0,
             }
+            d[f"{NODE_PREFIX}seed"] = seed_node
             d[f"{SEEN_PREFIX}seed"] = True  # don't process "seed" as a queue item
+            write_stream_event(scan_id, "node", seed_node)
             # First work item: the seed entity (depth 0)
             q.put({
                 "type": seed.type.value,
@@ -93,19 +108,35 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     d[seen_key] = True
                     seen_count += 1
 
-                    # Route to resolver by type (Phase 1: username only)
+                    # Route to resolver by entity type
                     source_entity_key = item.get("parent_key") or "seed"
                     if etype == EntityType.USERNAME.value:
+                        # Spawn GitHub resolver + deep GitHub + username enumeration + social
                         ref = username_resolver.resolve_github.spawn(
-                            value,
-                            etype,
-                            depth,
-                            source_entity_key,
-                            q,
-                            d,
+                            value, etype, depth, source_entity_key, q, d, scan_id
                         )
                         spawn_refs.append(ref)
-                    # Phase 2: email, domain, ip, phone, wallet
+                        for fn in (
+                            github_deep_resolver.resolve_github_deep,
+                            username_enum_resolver.enumerate_username,
+                            social_resolver.resolve_social,
+                        ):
+                            ref = fn.spawn(value, etype, depth, source_entity_key, q, d, scan_id)
+                            spawn_refs.append(ref)
+                    elif etype == EntityType.EMAIL.value:
+                        ref = email_resolver.resolve_email.spawn(
+                            value, etype, depth, source_entity_key, q, d, scan_id
+                        )
+                        spawn_refs.append(ref)
+                        ref2 = breach_resolver.resolve_breach.spawn(
+                            value, etype, depth, source_entity_key, q, d, scan_id
+                        )
+                        spawn_refs.append(ref2)
+                    elif etype == EntityType.DOMAIN.value:
+                        ref = domain_resolver.resolve_domain.spawn(
+                            value, etype, depth, source_entity_key, q, d, scan_id
+                        )
+                        spawn_refs.append(ref)
 
             # Wait for all spawned resolvers before snapshotting the graph
             for ref in spawn_refs:
@@ -131,6 +162,12 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 "entities_seen": seen_count,
                 "depth_reached": max_depth_reached,
             }
+            write_stream_event(scan_id, "status", {
+                "status": ScanStatus.COMPLETED.value,
+                "entities_seen": seen_count,
+                "depth_reached": max_depth_reached,
+                "error": None,
+            })
     except Exception as e:
         scan_results[scan_id] = {
             "status": ScanStatus.FAILED.value,
@@ -139,3 +176,9 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             "entities_seen": seen_count,
             "depth_reached": max_depth_reached,
         }
+        write_stream_event(scan_id, "status", {
+            "status": ScanStatus.FAILED.value,
+            "entities_seen": seen_count,
+            "depth_reached": max_depth_reached,
+            "error": str(e),
+        })

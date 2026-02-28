@@ -15,6 +15,7 @@ from app import app, image, osint_secret
 
 from models import Entity, EntityType
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
+from stream import write_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ def resolve_github(
     source_entity_key: str,
     q: modal.Queue,
     d: modal.Dict,
+    scan_id: str = "",
 ) -> None:
     """
     Resolve a username via GitHub API. Write node and edges to d, push discovered
@@ -108,6 +110,7 @@ def resolve_github(
         "depth": depth,
     }
     d[node_key] = node_payload
+    write_stream_event(scan_id, "node", node_payload)
 
     # Edge from source to this node
     edges_batch: list[dict[str, Any]] = [
@@ -159,6 +162,8 @@ def resolve_github(
 
     batch_key = f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"
     d[batch_key] = edges_batch
+    for edge in edges_batch:
+        write_stream_event(scan_id, "edge", edge)
 
     for item in to_push:
         q.put(item)
