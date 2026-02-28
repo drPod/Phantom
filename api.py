@@ -41,7 +41,7 @@ def fastapi_app() -> Any:
     def post_scan(req: ScanRequest) -> ScanResponse:
         scan_id = str(uuid.uuid4())
         config = (req.config or ScanConfig()).model_dump()
-        seed_entity = req.seed.model_dump()
+        seed_entity = req.seed.model_dump(mode="json")
         scan_results[scan_id] = {
             "status": ScanStatus.RUNNING.value,
             "graph": None,
