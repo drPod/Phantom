@@ -159,6 +159,8 @@
     #scan-btn:hover  { opacity: 0.85; box-shadow: 0 0 12px rgba(74,158,255,0.5); }
     #scan-btn:active { opacity: 0.7; }
     #scan-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #seed-type:disabled { opacity: 0.5; cursor: not-allowed; }
+    #seed-input:disabled { opacity: 0.5; cursor: not-allowed; }
 
     #demo-btn {
       background: transparent;
@@ -178,6 +180,26 @@
       box-shadow: 0 0 10px rgba(255,215,0,0.3);
     }
     #demo-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #stop-btn {
+      background: transparent;
+      border: 1px solid var(--error);
+      color: var(--error);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      padding: 8px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #stop-btn:hover {
+      background: rgba(255,68,68,0.1);
+      box-shadow: 0 0 10px rgba(255,68,68,0.3);
+    }
+    #stop-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #stop-btn.hidden { display: none; }
 
     /* ── main area ──────────────────────────────────────────────── */
     #main {
@@ -385,6 +407,7 @@
     </select>
     <button id="scan-btn">SCAN</button>
     <button id="demo-btn">⚡ DEMO</button>
+    <button id="stop-btn" class="hidden" disabled>STOP</button>
   </div>
 
   <!-- ── main ─────────────────────────────────────────────────────── -->
@@ -873,10 +896,12 @@ function setSseStatus(state) {
 // ════════════════════════════════════════════════════════════════════
 const scanBtn  = document.getElementById('scan-btn');
 const demoBtn  = document.getElementById('demo-btn');
+const stopBtn  = document.getElementById('stop-btn');
 const seedInput = document.getElementById('seed-input');
 const seedType  = document.getElementById('seed-type');
 
 scanBtn.addEventListener('click', startScan);
+stopBtn.addEventListener('click', stopScan);
 seedInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') startScan();
 });
@@ -903,6 +928,10 @@ function startScan() {
   exportBtn.style.display = 'none';
   scanBtn.disabled  = true;
   demoBtn.disabled  = true;
+  stopBtn.classList.remove('hidden');
+  stopBtn.disabled  = false;
+  seedType.disabled = true;
+  seedInput.disabled = true;
   elNodes.textContent     = '0';
   elEdges.textContent     = '0';
   elResolvers.textContent = '0';
@@ -920,14 +949,27 @@ function startScan() {
       currentScanId = data.scan_id;
       elScanId.textContent = currentScanId.slice(0, 8) + '…';
       openSSE(currentScanId);
+      stopBtn.classList.remove('hidden');
+      stopBtn.disabled = false;
     })
     .catch(err => {
       console.error('POST /scan failed:', err);
       setSseStatus('error');
       scanBtn.disabled = false;
       demoBtn.disabled = false;
+      stopBtn.classList.add('hidden');
+      stopBtn.disabled = true;
+      seedType.disabled = false;
+      seedInput.disabled = false;
       stopElapsedTimer();
     });
+}
+
+function stopScan() {
+  if (!currentScanId || scanCompleted) return;
+  stopBtn.disabled = true;
+  fetch(API_BASE_URL + '/scan/' + currentScanId + '/stop', { method: 'POST' })
+    .catch(err => console.error('POST /scan/stop failed:', err));
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -974,6 +1016,10 @@ function handleEvent(data) {
     setSseStatus('error');
     scanBtn.disabled = false;
     demoBtn.disabled = false;
+    stopBtn.classList.add('hidden');
+    stopBtn.disabled = true;
+    seedType.disabled = false;
+    seedInput.disabled = false;
     stopElapsedTimer();
   }
 }
@@ -1004,15 +1050,19 @@ function addEdge(payload) {
 
 function handleStatus(payload) {
   const status = payload?.status;
-  if (status === 'completed' || status === 'failed') {
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
     scanCompleted = true;
     stopElapsedTimer();
     setSseStatus('idle');
     scanBtn.disabled = false;
     demoBtn.disabled = false;
+    stopBtn.classList.add('hidden');
+    stopBtn.disabled = true;
+    seedType.disabled = false;
+    seedInput.disabled = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
 
-    if (status === 'completed') {
+    if (status === 'completed' || status === 'cancelled') {
       exportBtn.style.display = '';
       exportBtn.href = API_BASE_URL + '/scan/' + currentScanId + '/graph/download';
       exportBtn.download = `phantom-${currentScanId.slice(0, 8)}.json`;

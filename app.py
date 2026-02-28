@@ -19,6 +19,8 @@ image = (
         "networkx~=3.3",
         "pydantic~=2.9",
         "fastapi[standard]~=0.115",
+        "emailrep",
+        "leakcheck~=2.0.0",
         "dnspython~=2.7",
         "lxml~=5.3",
     )

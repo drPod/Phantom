@@ -150,6 +150,96 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 elif etype == EntityType.DOMAIN.value:
                     spawn_refs.append(domain_resolver.resolve_domain.spawn(value, etype, depth, source_entity_key, scan_id))
 
+            # If user requested stop, exit while after building partial graph
+            if "stop" in d:
+                for ref in spawn_refs:
+                    try:
+                        ref.get(timeout=120)
+                    except Exception:
+                        pass
+                snapshot_stop: dict[str, Any] = {}
+                for k in list(d.keys()):
+                    try:
+                        snapshot_stop[k] = d[k]
+                    except Exception:
+                        pass
+                try:
+                    from inference.extractor import EntityExtractor
+                    extractor = EntityExtractor()
+                    for k, v in list(snapshot_stop.items()):
+                        if not k.startswith(NODE_PREFIX) or not isinstance(v, dict):
+                            continue
+                        meta = v.get("metadata", {}) or {}
+                        node_value = v.get("value", "").strip().lower()
+                        text_parts = []
+                        for mval in meta.values():
+                            if isinstance(mval, str) and len(mval) > 4 and mval.strip().lower() != node_value:
+                                text_parts.append(mval)
+                            elif isinstance(mval, list):
+                                text_parts.extend(
+                                    s for s in mval
+                                    if isinstance(s, str) and len(s) > 4 and s.strip().lower() != node_value
+                                )
+                        text = " ".join(text_parts).strip()
+                        if len(text) < 20:
+                            continue
+                        try:
+                            extracted = extractor.extract_entities.remote(text)
+                        except Exception:
+                            continue
+                        source_node_id = v.get("id", k[len(NODE_PREFIX):])
+                        node_depth = v.get("depth", 0) + 1
+                        new_edges = []
+                        for etype_, vals in [
+                            (EntityType.EMAIL.value, extracted.get("emails", [])),
+                            (EntityType.USERNAME.value, extracted.get("usernames", [])),
+                            (EntityType.DOMAIN.value, extracted.get("domains", [])),
+                        ]:
+                            for val in vals:
+                                val = (val or "").strip()
+                                if not val:
+                                    continue
+                                ek = _entity_key(etype_, val)
+                                if ek == source_node_id:
+                                    continue
+                                nk = f"{NODE_PREFIX}{ek}"
+                                if nk not in snapshot_stop:
+                                    new_node = {
+                                        "id": ek,
+                                        "type": etype_,
+                                        "value": val,
+                                        "metadata": {"source": "gpu_extractor"},
+                                        "depth": node_depth,
+                                    }
+                                    snapshot_stop[nk] = new_node
+                                    write_stream_event(scan_id, "node", new_node)
+                                new_edges.append({
+                                    "source": source_node_id,
+                                    "target": ek,
+                                    "relationship": "extracted_by_gpu",
+                                    "confidence": 0.8,
+                                })
+                        if new_edges:
+                            snapshot_stop[f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"] = new_edges
+                            for edge in new_edges:
+                                write_stream_event(scan_id, "edge", edge)
+                except Exception:
+                    pass
+                graph_payload_stop = build_from_dict(snapshot_stop)
+                scan_results[scan_id] = {
+                    "status": ScanStatus.CANCELLED.value,
+                    "graph": graph_payload_stop,
+                    "error": None,
+                    "entities_seen": seen_count,
+                    "depth_reached": max_depth_reached,
+                }
+                write_stream_event(scan_id, "status", {
+                    "status": ScanStatus.CANCELLED.value,
+                    "entities_seen": seen_count,
+                    "depth_reached": max_depth_reached,
+                })
+                break
+
         for ref in spawn_refs:
             try:
                 ref.get(timeout=120)

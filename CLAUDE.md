@@ -1,0 +1,1 @@
+Always use ./venv/bin/python3 instead of python3 when running Python scripts in this project.

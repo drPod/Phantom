@@ -143,21 +143,55 @@ def resolve_domain(
                     "apiKey": whoisxml_key,
                     "domainName": domain,
                     "outputFormat": "JSON",
+                    "ip": 1,              # include associated IPs
+                    "ignoreRawTexts": 1,  # omit rawText fields for cleaner output
                 },
-                timeout=20,
+                timeout=60,
             )
             if r.status_code == 200:
                 wdata = r.json().get("WhoisRecord", {})
+
+                # Surface dataError for privacy-redacted or missing records
+                data_error = wdata.get("dataError", "")
+                if data_error:
+                    metadata["whois_data_error"] = data_error
+
                 registrant = wdata.get("registrant", {})
                 admin = wdata.get("administrativeContact", {})
+                tech = wdata.get("technicalContact", {})
+
                 metadata["whois_registrant_org"] = registrant.get("organization")
                 metadata["whois_registrant_name"] = registrant.get("name")
                 metadata["whois_registrant_country"] = registrant.get("country")
+                metadata["whois_registrant_country_code"] = registrant.get("countryCode")
+                metadata["whois_registrant_city"] = registrant.get("city")
+                metadata["whois_registrant_state"] = registrant.get("state")
                 metadata["whois_created_date"] = wdata.get("createdDate")
                 metadata["whois_updated_date"] = wdata.get("updatedDate")
                 metadata["whois_expires_date"] = wdata.get("expiresDate")
+                metadata["whois_estimated_age_days"] = wdata.get("estimatedDomainAge")
                 metadata["whois_registrar"] = wdata.get("registrarName")
-                for contact in (registrant, admin):
+                metadata["whois_registrar_iana_id"] = wdata.get("registrarIANAID")
+
+                # Name servers
+                ns_obj = wdata.get("nameServers", {})
+                if isinstance(ns_obj, dict):
+                    ns_hosts = ns_obj.get("hostNames", [])
+                    if ns_hosts:
+                        metadata["whois_nameservers"] = ns_hosts
+                        for ns in ns_hosts:
+                            if ns and "." in ns:
+                                discovered_domains.add(ns.lower())
+
+                # Associated IPs (returned when ip=1)
+                raw_ips = wdata.get("ips", [])
+                if raw_ips:
+                    metadata["whois_ips"] = raw_ips if isinstance(raw_ips, list) else [raw_ips]
+
+                # Harvest emails + phones from registrant, admin, and technical contacts
+                for contact in (registrant, admin, tech):
+                    if not contact:
+                        continue
                     email = (contact.get("email") or "").strip().lower()
                     if email and "@" in email and "registrar" not in email:
                         discovered_emails.add(email)
@@ -166,6 +200,107 @@ def resolve_domain(
                         metadata.setdefault("whois_phones", []).append(phone)
         except Exception as e:
             logger.warning("WhoisXML failed for %s: %s", domain, e)
+
+    # 3b. WhoisXML Subdomains Lookup API
+    if whoisxml_key:
+        try:
+            r = httpx.get(
+                "https://subdomains.whoisxmlapi.com/api/v1",
+                params={
+                    "apiKey": whoisxml_key,
+                    "domainName": domain,
+                    "outputFormat": "JSON",
+                },
+                timeout=30,
+            )
+            if r.status_code == 200:
+                sdata = r.json().get("result", {})
+                records = sdata.get("records", [])
+                sub_names = [rec.get("domain", "") for rec in records if rec.get("domain")]
+                if sub_names:
+                    metadata["whoisxml_subdomains"] = sub_names[:50]
+                    for sub in sub_names[:30]:
+                        cleaned = _clean_domain(sub)
+                        if cleaned and cleaned != domain:
+                            discovered_domains.add(cleaned)
+        except Exception as e:
+            logger.warning("WhoisXML Subdomains API failed for %s: %s", domain, e)
+
+    # 3c. WhoisXML Website Contacts API — emails, phones, social links, company names
+    if whoisxml_key:
+        try:
+            r = httpx.get(
+                "https://website-contacts.whoisxmlapi.com/api/v1",
+                params={
+                    "apiKey": whoisxml_key,
+                    "domainName": domain,
+                    "outputFormat": "JSON",
+                },
+                timeout=30,
+            )
+            if r.status_code == 200:
+                wc = r.json()
+                company_names = wc.get("companyNames", [])
+                if company_names:
+                    metadata["website_company_names"] = company_names
+                meta_block = wc.get("meta", {})
+                if meta_block.get("title"):
+                    metadata["website_title"] = meta_block["title"]
+                if meta_block.get("description"):
+                    metadata["website_description"] = meta_block["description"]
+                social = wc.get("socialLinks", {})
+                social_filtered = {k: v for k, v in social.items() if v}
+                if social_filtered:
+                    metadata["website_social_links"] = social_filtered
+                for email_entry in wc.get("emails", []):
+                    em = (email_entry.get("email") or "").strip().lower()
+                    if em and "@" in em and "registrar" not in em:
+                        discovered_emails.add(em)
+                for phone_entry in wc.get("phones", []):
+                    ph = (phone_entry.get("phoneNumber") or "").strip()
+                    if ph:
+                        metadata.setdefault("website_phones", []).append(ph)
+                postal = wc.get("postalAddresses", [])
+                if postal:
+                    metadata["website_postal_addresses"] = postal[:5]
+        except Exception as e:
+            logger.warning("WhoisXML Website Contacts API failed for %s: %s", domain, e)
+
+    # 3d. WhoisXML SSL Certificates API — harvest SANs as additional domains
+    if whoisxml_key:
+        try:
+            r = httpx.get(
+                "https://ssl-certificates.whoisxmlapi.com/api/v1",
+                params={
+                    "apiKey": whoisxml_key,
+                    "domainName": domain,
+                    "outputFormat": "JSON",
+                },
+                timeout=30,
+            )
+            if r.status_code == 200:
+                certs = r.json().get("certificates", [])
+                if certs:
+                    cert = certs[0]  # end-user certificate
+                    san_names = (
+                        cert.get("extensions", {})
+                        .get("subjectAlternativeNames", {})
+                        .get("dnsNames", [])
+                    )
+                    san_clean = [_clean_domain(n) for n in san_names if n and not n.startswith("*.")]
+                    if san_clean:
+                        metadata["ssl_san_domains"] = san_clean[:20]
+                        for san in san_clean[:10]:
+                            if san and san != domain:
+                                discovered_domains.add(san)
+                    cert_subject = cert.get("subject", {})
+                    if cert_subject.get("organization"):
+                        metadata["ssl_org"] = cert_subject["organization"]
+                    metadata["ssl_valid_from"] = cert.get("validFrom")
+                    metadata["ssl_valid_to"] = cert.get("validTo")
+                    metadata["ssl_issuer"] = cert.get("issuer", {}).get("organization")
+        except Exception as e:
+            logger.warning("WhoisXML SSL Certificates API failed for %s: %s", domain, e)
 
     # 4. SecurityTrails — historical DNS + subdomains
     sectrails_key = os.environ.get("SECURITYTRAILS_KEY", "")
@@ -202,6 +337,91 @@ def resolve_domain(
                 metadata["securitytrails_historical_ips"] = historical_ips
         except Exception as e:
             logger.warning("SecurityTrails history failed for %s: %s", domain, e)
+
+        try:
+            r = httpx.get(
+                f"https://api.securitytrails.com/v1/domain/{domain}/associated",
+                headers={"APIKEY": sectrails_key},
+                timeout=20,
+            )
+            if r.status_code == 200:
+                assoc_records = r.json().get("records", [])
+                assoc_domains = []
+                for rec in assoc_records:
+                    hostname = rec.get("hostname") or rec.get("name") or ""
+                    if hostname and "." in hostname:
+                        assoc_domains.append(hostname)
+                metadata["securitytrails_associated"] = assoc_domains[:20]
+                for ad in assoc_domains[:10]:
+                    discovered_domains.add(ad)
+        except Exception as e:
+            logger.warning("SecurityTrails associated failed for %s: %s", domain, e)
+
+    # 5. Hunter.io — company enrichment + domain search
+    hunter_key = os.environ.get("HUNTER_API_KEY", "")
+    if hunter_key:
+        hunter_headers = {"X-API-KEY": hunter_key}
+
+        # 5a. Company Enrichment
+        try:
+            r = httpx.get(
+                "https://api.hunter.io/v2/companies/find",
+                params={"domain": domain},
+                headers=hunter_headers,
+                timeout=15,
+            )
+            if r.status_code == 200:
+                cdata = r.json().get("data", {})
+                metadata["hunter_company_name"] = cdata.get("name")
+                metadata["hunter_company_industry"] = cdata.get("industry")
+                metadata["hunter_company_description"] = cdata.get("description")
+                metadata["hunter_company_country"] = cdata.get("country")
+                metadata["hunter_company_city"] = cdata.get("city")
+                metadata["hunter_company_employees"] = cdata.get("employees")
+                metadata["hunter_company_funding"] = cdata.get("funding_amount")
+                tech = cdata.get("technologies", [])
+                if tech:
+                    metadata["hunter_company_tech"] = [
+                        t.get("name") for t in tech[:20] if t.get("name")
+                    ]
+        except Exception as e:
+            logger.warning("Hunter.io company enrichment failed for %s: %s", domain, e)
+
+        # 5b. Domain Search — discover up to 10 emails on this domain
+        hunter_emails: list[str] = []
+        try:
+            r = httpx.get(
+                "https://api.hunter.io/v2/domain-search",
+                params={"domain": domain, "limit": 10},
+                headers=hunter_headers,
+                timeout=20,
+            )
+            if r.status_code == 200:
+                dsdata = r.json().get("data", {})
+                metadata["hunter_email_count"] = (dsdata.get("meta") or {}).get("total")
+                for item in dsdata.get("emails", []):
+                    em = (item.get("value") or "").strip().lower()
+                    if em and "@" in em:
+                        hunter_emails.append(em)
+        except Exception as e:
+            logger.warning("Hunter.io domain search failed for %s: %s", domain, e)
+
+        for em in hunter_emails:
+            ek = _entity_key(EntityType.EMAIL.value, em)
+            to_push.append({
+                "type": EntityType.EMAIL.value,
+                "value": em,
+                "source": SOURCE,
+                "confidence": 0.9,
+                "depth": depth + 1,
+                "parent_key": node_id,
+            })
+            edges_batch.append({
+                "source": node_id,
+                "target": ek,
+                "relationship": "hunter_found_email",
+                "confidence": 0.9,
+            })
 
     # Push discovered emails
     for email in discovered_emails:

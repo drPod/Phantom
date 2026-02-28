@@ -65,6 +65,18 @@ def fastapi_app() -> Any:
             error=row.get("error"),
         )
 
+    @web_app.post("/scan/{scan_id}/stop")
+    def post_scan_stop(scan_id: str):
+        """Signal the running scan to stop. Idempotent."""
+        if scan_id not in scan_results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        row = scan_results[scan_id]
+        if row["status"] != ScanStatus.RUNNING.value:
+            return {"ok": True, "already_stopped": True}
+        d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
+        d["stop"] = True
+        return {"ok": True}
+
     @web_app.get("/scan/{scan_id}/graph", response_model=GraphResponse)
     def get_scan_graph(scan_id: str) -> GraphResponse:
         if scan_id not in scan_results:
@@ -74,6 +86,7 @@ def fastapi_app() -> Any:
             raise HTTPException(status_code=202, detail="Scan still running")
         if row["status"] == ScanStatus.FAILED.value:
             raise HTTPException(status_code=503, detail=row.get("error") or "Scan failed")
+        # CANCELLED and COMPLETED both return the graph (possibly partial)
         graph = row.get("graph")
         if not graph:
             return GraphResponse(nodes=[], edges=[])
@@ -90,6 +103,7 @@ def fastapi_app() -> Any:
         row = scan_results[scan_id]
         if row["status"] == ScanStatus.RUNNING.value:
             raise HTTPException(status_code=202, detail="Scan still running")
+        # CANCELLED and COMPLETED both allow download
         graph = row.get("graph") or {}
         content = _json.dumps(
             {
@@ -149,7 +163,7 @@ def fastapi_app() -> Any:
                     return
 
                 status = row.get("status", "running")
-                if status in (ScanStatus.COMPLETED.value, ScanStatus.FAILED.value):
+                if status in (ScanStatus.COMPLETED.value, ScanStatus.FAILED.value, ScanStatus.CANCELLED.value):
                     # Drain any remaining events one last time
                     final_events: list[dict[str, Any]] = []
                     try:
