@@ -19,6 +19,7 @@
       --success:   #50C878;
       --error:     #FF4444;
       --warn:      #FF8C42;
+      --gold:      #FFD700;
       --glow:      rgba(74,158,255,0.15);
       --font:      'Consolas', 'Monaco', 'Courier New', monospace;
     }
@@ -84,10 +85,21 @@
       border-radius: 50%;
       background: var(--text2);
       transition: background 0.3s;
+      flex-shrink: 0;
     }
-    #sse-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
-    #sse-dot.error     { background: var(--error);   box-shadow: 0 0 6px var(--error); }
+    #sse-dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    #sse-dot.error     { background: var(--error);  box-shadow: 0 0 6px var(--error); }
     #sse-dot.idle      { background: var(--text2); }
+
+    @keyframes scanning-blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+    #sse-label.scanning {
+      color: var(--accent);
+      animation: scanning-blink 1.1s ease-in-out infinite;
+      font-weight: bold;
+    }
 
     /* ── input row ──────────────────────────────────────────────── */
     #input-row {
@@ -148,6 +160,25 @@
     #scan-btn:active { opacity: 0.7; }
     #scan-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    #demo-btn {
+      background: transparent;
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      padding: 8px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #demo-btn:hover {
+      background: rgba(255,215,0,0.1);
+      box-shadow: 0 0 10px rgba(255,215,0,0.3);
+    }
+    #demo-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
     /* ── main area ──────────────────────────────────────────────── */
     #main {
       flex: 1 1 auto;
@@ -173,18 +204,21 @@
     #tooltip {
       position: absolute;
       display: none;
-      background: rgba(10,14,26,0.92);
+      background: rgba(10,14,26,0.95);
       border: 1px solid var(--border2);
       color: var(--text);
       font-family: var(--font);
       font-size: 11px;
-      padding: 5px 10px;
-      border-radius: 3px;
+      padding: 7px 12px;
+      border-radius: 4px;
       pointer-events: none;
       white-space: nowrap;
       z-index: 100;
       letter-spacing: 0.5px;
+      line-height: 1.7;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     }
+    #tooltip b { color: var(--accent); font-size: 12px; }
 
     /* ── right sidebar ──────────────────────────────────────────── */
     #sidebar {
@@ -284,23 +318,26 @@
       border-radius: 3px;
       cursor: pointer;
       transition: background 0.2s;
+      text-decoration: none;
     }
     #export-btn:hover { background: rgba(80,200,120,0.12); }
 
     /* ── D3 graph styles ────────────────────────────────────────── */
     .link {
       stroke-opacity: 0.55;
-      stroke-width: 1.4;
       fill: none;
     }
 
     .node-circle {
-      stroke-width: 1;
-      stroke: rgba(255,255,255,0.2);
+      stroke-width: 1.5;
       cursor: pointer;
       transition: stroke 0.15s;
     }
-    .node-circle:hover { stroke: #fff; stroke-width: 1.5; }
+    .node-circle:hover { stroke: #fff !important; stroke-width: 2.5 !important; }
+
+    .seed-ring {
+      pointer-events: none;
+    }
 
     .node-label {
       fill: #8aaccc;
@@ -347,6 +384,7 @@
       <option value="wallet">WALLET</option>
     </select>
     <button id="scan-btn">SCAN</button>
+    <button id="demo-btn">⚡ DEMO</button>
   </div>
 
   <!-- ── main ─────────────────────────────────────────────────────── -->
@@ -367,11 +405,12 @@
 
   <!-- ── stats bar ────────────────────────────────────────────────── -->
   <div id="statsbar">
-    <span class="stat-item">ENTITIES: <span id="stat-entities">0</span></span>
-    <span class="stat-item">DEPTH: <span id="stat-depth">0</span></span>
+    <span class="stat-item">NODES: <span id="stat-nodes">0</span></span>
+    <span class="stat-item">EDGES: <span id="stat-edges">0</span></span>
+    <span class="stat-item">RESOLVERS: <span id="stat-resolvers">0</span></span>
     <span class="stat-item">ELAPSED: <span id="stat-elapsed">—</span></span>
     <span class="stat-item" style="color:#3a4f6a;">SCAN: <span id="stat-scanid" style="color:#3a4f6a;">—</span></span>
-    <button id="export-btn" style="display:none">⬇ EXPORT JSON</button>
+    <a id="export-btn" style="display:none">⬇ EXPORT JSON</a>
   </div>
 
 </div>
@@ -393,36 +432,65 @@ const NODE_COLORS = {
   default:  '#7f8fa6',
 };
 
+const TYPE_EMOJIS = {
+  username: '👤',
+  email:    '📧',
+  domain:   '🌐',
+  ip:       '🖥',
+  phone:    '📱',
+  wallet:   '💰',
+  default:  '◆',
+};
+
 function nodeColor(d) {
   return NODE_COLORS[d.type] || NODE_COLORS.default;
 }
 
+function isSeed(d) {
+  return d.metadata?.seed === true || d.depth === 0;
+}
+
 function nodeRadius(d) {
-  if (d.id === 'seed' || d.metadata?.seed) return 28;
+  if (isSeed(d)) return 28;
   const depth = d.depth || 0;
-  if (depth === 0) return 24;
   if (depth === 1) return 18;
   if (depth === 2) return 14;
   return 10;
 }
 
+function nodeLabel(d) {
+  const emoji = TYPE_EMOJIS[d.type] || TYPE_EMOJIS.default;
+  const v = d.value || d.id;
+  let display;
+  if (d.type === 'email' && v.includes('@')) {
+    const [user, domain] = v.split('@');
+    display = user.length > 8
+      ? user.slice(0, 7) + '…@' + (domain.length > 8 ? domain.slice(0, 7) + '…' : domain)
+      : v;
+  } else {
+    display = v.length > 15 ? v.slice(0, 13) + '…' : v;
+  }
+  return `${emoji} ${display}`;
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  STATE
 // ════════════════════════════════════════════════════════════════════
-let eventSource   = null;
-let currentScanId = null;
-let startTime     = null;
-let elapsedTimer  = null;
-let graphData     = null;  // stored for export
+let eventSource    = null;
+let currentScanId  = null;
+let startTime      = null;
+let elapsedTimer   = null;
+let scanCompleted  = false;
 
-const nodesMap = new Map();   // id → node obj
-let   nodes    = [];
-let   links    = [];
+const nodesMap      = new Map();   // id → node obj
+const resolversSeen = new Set();   // unique resolver sources
+let   nodes         = [];
+let   links         = [];
 
 // ════════════════════════════════════════════════════════════════════
 //  D3 SETUP
 // ════════════════════════════════════════════════════════════════════
-const wrap = document.getElementById('graph-wrap');
+const wrap  = document.getElementById('graph-wrap');
 const svgEl = document.getElementById('graph');
 
 const svg = d3.select(svgEl);
@@ -432,25 +500,36 @@ const g   = svg.append('g');
 const defs = svg.append('defs');
 
 // Glow filter
-const glowFilter = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+const glowFilter = defs.append('filter')
+  .attr('id', 'glow').attr('x', '-50%').attr('y', '-50%')
+  .attr('width', '200%').attr('height', '200%');
 glowFilter.append('feGaussianBlur').attr('stdDeviation', '3.5').attr('result', 'blur');
 const feMerge = glowFilter.append('feMerge');
 feMerge.append('feMergeNode').attr('in', 'blur');
 feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
+// Gold glow filter for seed node
+const goldGlow = defs.append('filter')
+  .attr('id', 'glow-gold').attr('x', '-60%').attr('y', '-60%')
+  .attr('width', '220%').attr('height', '220%');
+goldGlow.append('feGaussianBlur').attr('stdDeviation', '5').attr('result', 'blur');
+const feMergeGold = goldGlow.append('feMerge');
+feMergeGold.append('feMergeNode').attr('in', 'blur');
+feMergeGold.append('feMergeNode').attr('in', 'SourceGraphic');
+
 // Arrow markers per node type
 Object.entries(NODE_COLORS).forEach(([type, color]) => {
   defs.append('marker')
-    .attr('id',          `arrow-${type}`)
-    .attr('viewBox',     '0 -5 10 10')
-    .attr('refX',        26)
-    .attr('refY',        0)
-    .attr('markerWidth', 6)
-    .attr('markerHeight',6)
-    .attr('orient',      'auto')
+    .attr('id',           `arrow-${type}`)
+    .attr('viewBox',      '0 -5 10 10')
+    .attr('refX',         26)
+    .attr('refY',         0)
+    .attr('markerWidth',  6)
+    .attr('markerHeight', 6)
+    .attr('orient',       'auto')
     .append('path')
-    .attr('d',    'M0,-5L10,0L0,5')
-    .attr('fill', color)
+    .attr('d',           'M0,-5L10,0L0,5')
+    .attr('fill',        color)
     .attr('fill-opacity', 0.65);
 });
 
@@ -488,14 +567,59 @@ window.addEventListener('resize', () => {
   simulation.alpha(0.1).restart();
 });
 
+// ── zoom-to-fit ──────────────────────────────────────────────────────
+function zoomToFit(padding = 60) {
+  if (nodes.length === 0) return;
+  const { w, h } = getSize();
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  nodes.forEach(d => {
+    const r = nodeRadius(d) + 8;
+    minX = Math.min(minX, (d.x || 0) - r);
+    maxX = Math.max(maxX, (d.x || 0) + r);
+    minY = Math.min(minY, (d.y || 0) - r);
+    maxY = Math.max(maxY, (d.y || 0) + r);
+  });
+
+  const bw = Math.max(maxX - minX, 1);
+  const bh = Math.max(maxY - minY, 1);
+  const scale = Math.min((w - padding * 2) / bw, (h - padding * 2) / bh, 4);
+  const tx = w / 2 - scale * (minX + bw / 2);
+  const ty = h / 2 - scale * (minY + bh / 2);
+
+  svg.transition().duration(900).ease(d3.easeCubicInOut)
+    .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+
 // ── tooltip ──────────────────────────────────────────────────────────
 const tooltip = document.getElementById('tooltip');
 
-function showTooltip(event, text) {
-  tooltip.style.display = 'block';
-  tooltip.style.left    = (event.pageX + 12) + 'px';
-  tooltip.style.top     = (event.pageY - 32) + 'px';
-  tooltip.textContent   = text;
+function showNodeTooltip(event, d) {
+  const emoji = TYPE_EMOJIS[d.type] || '◆';
+  const meta  = d.metadata || {};
+  const lines = [];
+
+  lines.push(`<b>${emoji} ${escHtml(d.value || d.id)}</b>`);
+
+  if (meta.name && meta.name !== d.value)  lines.push(`Name: ${escHtml(meta.name)}`);
+  if (meta.email && d.type !== 'email')     lines.push(`📧 ${escHtml(meta.email)}`);
+  if (meta.company)                         lines.push(`🏢 ${escHtml(meta.company)}`);
+  if (meta.location)                        lines.push(`📍 ${escHtml(meta.location)}`);
+  if (meta.followers !== undefined)         lines.push(`👥 ${meta.followers} followers`);
+  if (meta.public_repos !== undefined)      lines.push(`📁 ${meta.public_repos} repos`);
+
+  const sitesFound = meta.sites_found ?? (Array.isArray(meta.found_on) ? meta.found_on.length : undefined);
+  if (sitesFound !== undefined)             lines.push(`🌐 ${sitesFound} sites found`);
+
+  const breachCount = meta.breach_count ?? (Array.isArray(meta.breaches) ? meta.breaches.length : undefined);
+  if (breachCount !== undefined)            lines.push(`⚠️ ${breachCount} breaches`);
+
+  if (meta.source)                          lines.push(`<span style="color:var(--text2)">via ${escHtml(meta.source)}</span>`);
+
+  tooltip.innerHTML      = lines.join('<br>');
+  tooltip.style.display  = 'block';
+  tooltip.style.left     = (event.pageX + 14) + 'px';
+  tooltip.style.top      = (event.pageY - 44) + 'px';
 }
 function hideTooltip() { tooltip.style.display = 'none'; }
 
@@ -507,7 +631,8 @@ let nodeSel = nodeLayer.selectAll('g.node');
 
 function updateGraph() {
   // ── links ──────────────────────────────────────────────────────────
-  linkSel = linkLayer.selectAll('line').data(links, d => `${d.source?.id || d.source}-${d.target?.id || d.target}`);
+  linkSel = linkLayer.selectAll('line')
+    .data(links, d => `${d.source?.id || d.source}-${d.target?.id || d.target}`);
 
   linkSel.exit().remove();
 
@@ -517,6 +642,7 @@ function updateGraph() {
       const srcType = typeof d.source === 'object' ? d.source.type : 'default';
       return NODE_COLORS[srcType] || NODE_COLORS.default;
     })
+    .attr('stroke-width', d => Math.max(0.8, (d.confidence || 1.0) * 2.4))
     .attr('marker-end', d => {
       const srcType = typeof d.source === 'object' ? d.source.type : 'default';
       return `url(#arrow-${srcType in NODE_COLORS ? srcType : 'default'})`;
@@ -544,24 +670,37 @@ function updateGraph() {
     .on('click', (event, d) => {
       event.stopPropagation();
       showSidebar(d);
-    });
+    })
+    .on('mouseover', (event, d) => showNodeTooltip(event, d))
+    .on('mousemove', (event, d) => {
+      tooltip.style.left = (event.pageX + 14) + 'px';
+      tooltip.style.top  = (event.pageY - 44) + 'px';
+    })
+    .on('mouseout', hideTooltip);
+
+  // Outer ring for seed node (gold dashed)
+  nodeEnter.filter(d => isSeed(d)).append('circle')
+    .attr('class', 'seed-ring')
+    .attr('r', d => nodeRadius(d) + 7)
+    .attr('fill', 'none')
+    .attr('stroke', '#FFD700')
+    .attr('stroke-width', 1.8)
+    .attr('stroke-opacity', 0.7)
+    .attr('stroke-dasharray', '5 3');
 
   nodeEnter.append('circle')
     .attr('class', 'node-circle')
     .attr('r',    d => nodeRadius(d))
     .attr('fill', d => nodeColor(d))
-    .attr('filter', 'url(#glow)')
-    .attr('stroke', d => nodeColor(d))
-    .attr('stroke-width', 1.5)
-    .attr('stroke-opacity', 0.5);
+    .attr('filter', d => isSeed(d) ? 'url(#glow-gold)' : 'url(#glow)')
+    .attr('stroke', d => isSeed(d) ? '#FFD700' : nodeColor(d))
+    .attr('stroke-width', d => isSeed(d) ? 2.5 : 1.5)
+    .attr('stroke-opacity', d => isSeed(d) ? 1 : 0.5);
 
   nodeEnter.append('text')
     .attr('class', 'node-label')
-    .attr('dy', d => nodeRadius(d) + 13)
-    .text(d => {
-      const v = d.value || d.id;
-      return v.length > 18 ? v.slice(0, 16) + '…' : v;
-    });
+    .attr('dy', d => nodeRadius(d) + 14)
+    .text(d => nodeLabel(d));
 
   // Remove 'node-new' class after animation
   nodeEnter.each(function() {
@@ -577,9 +716,14 @@ function updateGraph() {
   simulation.alpha(0.3).restart();
 }
 
-function ticked() {
-  const { w, h } = getSize();
+function showTooltip(event, text) {
+  tooltip.innerHTML     = escHtml(text);
+  tooltip.style.display = 'block';
+  tooltip.style.left    = (event.pageX + 14) + 'px';
+  tooltip.style.top     = (event.pageY - 40) + 'px';
+}
 
+function ticked() {
   linkSel
     .attr('x1', d => d.source.x)
     .attr('y1', d => d.source.y)
@@ -636,8 +780,12 @@ function showSidebar(d) {
   sidebar.classList.remove('collapsed');
   const color = nodeColor(d);
   const type  = (d.type || 'unknown').toUpperCase();
+  const emoji = TYPE_EMOJIS[d.type] || '◆';
 
-  let html = `<span class="detail-type-badge" style="background:${color}22;color:${color};border:1px solid ${color}44;">${type}</span>`;
+  let html = `<span class="detail-type-badge" style="background:${color}22;color:${color};border:1px solid ${color}44;">${emoji} ${type}</span>`;
+  if (isSeed(d)) {
+    html += `<span class="detail-type-badge" style="background:#FFD70022;color:#FFD700;border:1px solid #FFD70044;margin-left:6px;">SEED</span>`;
+  }
   html += `<div class="detail-value">${escHtml(d.value || d.id)}</div>`;
   html += `<div class="detail-kv"><div class="detail-key">ID</div><div class="detail-val">${escHtml(d.id)}</div></div>`;
   html += `<div class="detail-kv"><div class="detail-key">DEPTH</div><div class="detail-val">${d.depth ?? 0}</div></div>`;
@@ -645,7 +793,14 @@ function showSidebar(d) {
   const meta = d.metadata || {};
   for (const [k, v] of Object.entries(meta)) {
     if (v === null || v === undefined || v === '') continue;
-    html += `<div class="detail-kv"><div class="detail-key">${escHtml(k.toUpperCase())}</div><div class="detail-val">${escHtml(String(v))}</div></div>`;
+    if (Array.isArray(v)) {
+      if (v.length === 0) continue;
+      html += `<div class="detail-kv"><div class="detail-key">${escHtml(k.toUpperCase())}</div><div class="detail-val">${v.length} items</div></div>`;
+    } else if (typeof v === 'object') {
+      continue;
+    } else {
+      html += `<div class="detail-kv"><div class="detail-key">${escHtml(k.toUpperCase())}</div><div class="detail-val">${escHtml(String(v))}</div></div>`;
+    }
   }
 
   sidebarBody.innerHTML = html;
@@ -662,21 +817,17 @@ function escHtml(s) {
 // ════════════════════════════════════════════════════════════════════
 //  STATS BAR
 // ════════════════════════════════════════════════════════════════════
-const elEntities = document.getElementById('stat-entities');
-const elDepth    = document.getElementById('stat-depth');
-const elElapsed  = document.getElementById('stat-elapsed');
-const elScanId   = document.getElementById('stat-scanid');
-const exportBtn  = document.getElementById('export-btn');
+const elNodes     = document.getElementById('stat-nodes');
+const elEdges     = document.getElementById('stat-edges');
+const elResolvers = document.getElementById('stat-resolvers');
+const elElapsed   = document.getElementById('stat-elapsed');
+const elScanId    = document.getElementById('stat-scanid');
+const exportBtn   = document.getElementById('export-btn');
 
-function updateStats(extra = {}) {
-  elEntities.textContent = nodesMap.size;
-  if (extra.depth_reached !== undefined) {
-    elDepth.textContent = extra.depth_reached;
-  }
-  if (extra.status) {
-    const colors = { running: 'var(--accent)', completed: 'var(--success)', failed: 'var(--error)' };
-    elDepth.style.color = colors[extra.status] || '';
-  }
+function updateStats() {
+  elNodes.textContent     = nodesMap.size;
+  elEdges.textContent     = links.length;
+  elResolvers.textContent = resolversSeen.size;
 }
 
 function startElapsedTimer() {
@@ -701,14 +852,18 @@ const sseDot   = document.getElementById('sse-dot');
 const sseLabel = document.getElementById('sse-label');
 
 function setSseStatus(state) {
-  sseDot.className = `idle`;
+  sseDot.className = '';
+  sseLabel.classList.remove('scanning');
+
   if (state === 'connected') {
-    sseDot.className = 'connected';
-    sseLabel.textContent = 'CONNECTED';
+    sseDot.classList.add('connected');
+    sseLabel.textContent = 'SCANNING...';
+    sseLabel.classList.add('scanning');
   } else if (state === 'error') {
-    sseDot.className = 'error';
+    sseDot.classList.add('error');
     sseLabel.textContent = 'RECONNECTING';
   } else {
+    sseDot.classList.add('idle');
     sseLabel.textContent = 'IDLE';
   }
 }
@@ -716,28 +871,43 @@ function setSseStatus(state) {
 // ════════════════════════════════════════════════════════════════════
 //  SCAN LOGIC
 // ════════════════════════════════════════════════════════════════════
-document.getElementById('scan-btn').addEventListener('click', startScan);
-document.getElementById('seed-input').addEventListener('keydown', e => {
+const scanBtn  = document.getElementById('scan-btn');
+const demoBtn  = document.getElementById('demo-btn');
+const seedInput = document.getElementById('seed-input');
+const seedType  = document.getElementById('seed-type');
+
+scanBtn.addEventListener('click', startScan);
+seedInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') startScan();
 });
 
+demoBtn.addEventListener('click', () => {
+  seedInput.value = 'torvalds';
+  seedType.value  = 'username';
+  startScan();
+});
+
 function startScan() {
-  const seed = document.getElementById('seed-input').value.trim();
-  const type = document.getElementById('seed-type').value;
+  const seed = seedInput.value.trim();
+  const type = seedType.value;
   if (!seed) return;
 
   // Reset graph
   nodesMap.clear();
+  resolversSeen.clear();
   nodes = [];
   links = [];
+  scanCompleted = false;
   updateGraph();
   collapseSidebar();
   exportBtn.style.display = 'none';
-  document.getElementById('scan-btn').disabled = true;
-  elEntities.textContent = '0';
-  elDepth.textContent    = '0';
-  elElapsed.textContent  = '0s';
-  elScanId.textContent   = '…';
+  scanBtn.disabled  = true;
+  demoBtn.disabled  = true;
+  elNodes.textContent     = '0';
+  elEdges.textContent     = '0';
+  elResolvers.textContent = '0';
+  elElapsed.textContent   = '0s';
+  elScanId.textContent    = '…';
   startElapsedTimer();
 
   fetch(API_BASE_URL + '/scan', {
@@ -754,7 +924,8 @@ function startScan() {
     .catch(err => {
       console.error('POST /scan failed:', err);
       setSseStatus('error');
-      document.getElementById('scan-btn').disabled = false;
+      scanBtn.disabled = false;
+      demoBtn.disabled = false;
       stopElapsedTimer();
     });
 }
@@ -776,12 +947,13 @@ function openSSE(scanId) {
   };
 
   eventSource.onerror = function() {
+    if (scanCompleted) return;
     setSseStatus('error');
     eventSource.close();
     eventSource = null;
     // Reconnect after 3 s if scan not finished
     setTimeout(() => {
-      if (currentScanId) openSSE(currentScanId);
+      if (currentScanId && !scanCompleted) openSSE(currentScanId);
     }, 3000);
   };
 }
@@ -800,7 +972,8 @@ function handleEvent(data) {
     handleStatus(data.payload);
   } else if (data.type === 'error') {
     setSseStatus('error');
-    document.getElementById('scan-btn').disabled = false;
+    scanBtn.disabled = false;
+    demoBtn.disabled = false;
     stopElapsedTimer();
   }
 }
@@ -811,49 +984,43 @@ function addNode(payload) {
   const node = { ...payload };
   nodesMap.set(node.id, node);
   nodes.push(node);
+
+  // Track resolver sources
+  const src = node.metadata?.source || node.source;
+  if (src) resolversSeen.add(src);
+
   updateGraph();
   updateStats();
 }
 
 function addEdge(payload) {
   if (!payload || !payload.source || !payload.target) return;
-  // avoid duplicate links
   const key = `${payload.source}-${payload.target}`;
   if (links.some(l => `${l.source?.id||l.source}-${l.target?.id||l.target}` === key)) return;
   links.push({ ...payload });
   updateGraph();
+  updateStats();
 }
 
 function handleStatus(payload) {
-  updateStats(payload);
   const status = payload?.status;
   if (status === 'completed' || status === 'failed') {
+    scanCompleted = true;
     stopElapsedTimer();
     setSseStatus('idle');
-    document.getElementById('scan-btn').disabled = false;
+    scanBtn.disabled = false;
+    demoBtn.disabled = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
+
     if (status === 'completed') {
       exportBtn.style.display = '';
-      graphData = { nodes, links };
+      exportBtn.href = API_BASE_URL + '/scan/' + currentScanId + '/graph/download';
+      exportBtn.download = `phantom-${currentScanId.slice(0, 8)}.json`;
+      // Auto-fit graph after simulation settles
+      setTimeout(() => zoomToFit(60), 1800);
     }
   }
 }
-
-// ════════════════════════════════════════════════════════════════════
-//  EXPORT
-// ════════════════════════════════════════════════════════════════════
-exportBtn.addEventListener('click', () => {
-  if (!graphData) return;
-  const blob = new Blob(
-    [JSON.stringify({ scan_id: currentScanId, nodes: graphData.nodes, links: graphData.links }, null, 2)],
-    { type: 'application/json' }
-  );
-  const a = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = `phantom-${currentScanId?.slice(0,8) || 'export'}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
 </script>
 </body>
 </html>

@@ -79,6 +79,33 @@ def fastapi_app() -> Any:
             return GraphResponse(nodes=[], edges=[])
         return GraphResponse(nodes=graph.get("nodes", []), edges=graph.get("edges", []))
 
+    @web_app.get("/scan/{scan_id}/graph/download")
+    def download_scan_graph(scan_id: str):
+        """Return the completed graph as a downloadable JSON file."""
+        import json as _json
+        from fastapi.responses import Response
+
+        if scan_id not in scan_results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        row = scan_results[scan_id]
+        if row["status"] == ScanStatus.RUNNING.value:
+            raise HTTPException(status_code=202, detail="Scan still running")
+        graph = row.get("graph") or {}
+        content = _json.dumps(
+            {
+                "scan_id": scan_id,
+                "nodes": graph.get("nodes", []),
+                "edges": graph.get("edges", []),
+            },
+            indent=2,
+        )
+        filename = f"phantom-{scan_id[:8]}.json"
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @web_app.get("/scan/{scan_id}/stream")
     async def stream_scan(scan_id: str) -> StreamingResponse:
         """
