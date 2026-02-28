@@ -13,6 +13,7 @@ import modal
 from app import app, image, osint_secret
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
 from models import EntityType
+from stream import write_stream_event
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ def resolve_domain(
     source_entity_key: str,
     q: modal.Queue,
     d: modal.Dict,
+    scan_id: str = "",
 ) -> None:
     """Resolve a domain via crt.sh, WhoisXML, DNS lookups, and SecurityTrails."""
     if "stop" in d:
@@ -239,15 +241,19 @@ def resolve_domain(
         })
 
     # Write node
-    d[f"{NODE_PREFIX}{node_id}"] = {
+    node_payload = {
         "id": node_id,
         "type": EntityType.DOMAIN.value,
         "value": domain,
         "metadata": metadata,
         "depth": depth,
     }
+    d[f"{NODE_PREFIX}{node_id}"] = node_payload
+    write_stream_event(scan_id, "node", node_payload)
 
     d[f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"] = edges_batch
+    for edge in edges_batch:
+        write_stream_event(scan_id, "edge", edge)
 
     for item in to_push:
         q.put(item)
