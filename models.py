@@ -94,6 +94,10 @@ class SeedRequest(BaseModel):
     type: EntityType
     value: str
     email: str | None = None
+    real_name: str | None = Field(default=None, description=(
+        "Known real name of the target (e.g. 'Darsh Poddar'). "
+        "Used to anchor identity and reject mismatches faster."
+    ))
 
 
 class ScanRequest(BaseModel):

@@ -41,6 +41,7 @@ def fastapi_app() -> Any:
         config = (req.config or ScanConfig()).model_dump()
         seed_entity = req.seed.model_dump(mode="json")
         email = req.seed.email
+        real_name = req.seed.real_name
         scan_results[scan_id] = {
             "status": ScanStatus.RUNNING.value,
             "graph": None,
@@ -48,7 +49,7 @@ def fastapi_app() -> Any:
             "entities_seen": 1,
             "depth_reached": 0,
         }
-        run_scan.spawn(scan_id, seed_entity, config, email)
+        run_scan.spawn(scan_id, seed_entity, config, email, real_name)
         return ScanResponse(scan_id=scan_id)
 
     @web_app.get("/scan/{scan_id}/status", response_model=StatusResponse)

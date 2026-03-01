@@ -560,7 +560,7 @@ def _harvest_analyst_future(
 
 
 @app.function(image=image, secrets=[osint_secret], timeout=1200)
-def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, Any], email: str | None = None) -> None:
+def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, Any], email: str | None = None, real_name: str | None = None) -> None:
     """Planner–Analyst scan loop.
 
     Planner (multi-turn, lean context)  picks resolver tools.
@@ -653,6 +653,7 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             max_entities=config.max_entities,
             scan_id=scan_id,
             email=email,
+            real_name=real_name,
         )
 
         initial_content = f"Investigate {seed.type.value}: {seed.value}"
@@ -682,14 +683,40 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
 
             # ===== TURN-0 BLAST: dispatch all seed resolvers before planner =====
             # For username seeds, immediately fire all reliable resolvers in parallel
+            # plus enumerate the most common username variants (dr_pod, DrP0d, etc.)
             # so results are in-flight while the planner LLM call is pending.
-            # This eliminates one full round-trip of planner latency on the seed.
             if seed.type.value == "username":
                 _blast_resolvers = [
                     ("resolve_github", seed.value, "username", 0),
                     ("enumerate_username", seed.value, "username", 0),
                     ("resolve_social", seed.value, "username", 0),
                 ]
+                # Auto-generate username variants to enumerate simultaneously
+                _uv = seed.value
+                _variants: list[str] = []
+                _uv_lower = _uv.lower()
+                # dot/underscore/dash substitutions
+                for _sep1 in ('.', '_', '-', ''):
+                    for _sep2 in ('.', '_', '-', ''):
+                        if _sep1 != _sep2:
+                            _candidate = re.sub(r'[._-]', _sep1, _uv_lower).replace(_sep1 + _sep1, _sep1)
+                            if _candidate != _uv_lower and _candidate not in _variants:
+                                _variants.append(_candidate)
+                # leet: 0 for o/O
+                _leet = re.sub(r'[oO]', '0', _uv_lower)
+                if _leet != _uv_lower and _leet not in _variants:
+                    _variants.append(_leet)
+                # cap first char
+                if _uv[0].islower():
+                    _cap = _uv[0].upper() + _uv[1:]
+                    if _cap not in _variants and _cap != _uv:
+                        _variants.append(_cap)
+                # deduplicate and limit (don't spam too many)
+                _variants = [v for v in _variants if v != _uv and v != _uv_lower][:5]
+                for _var in _variants:
+                    _blast_resolvers.append(("enumerate_username", _var, "username", 1))
+
+                blast_count = 0
                 for _bname, _bval, _btype, _bdepth in _blast_resolvers:
                     _bek = _entity_key(_btype, _bval)
                     if not graph_state.is_resolved(_bname, _bek):
@@ -702,10 +729,11 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                                 entities_seen += 1
                         in_flight.submit(_bref, _bname, _bek, scan_id)
                         total_dispatched += 1
+                        blast_count += 1
                         log_scan_event(scan_id, "resolver_spawned",
                                        resolver=_bname, entity_key=_bek, depth=_bdepth,
                                        note="turn0_blast")
-                _narrate(scan_id, f"Blast-dispatched {len(_blast_resolvers)} seed resolvers in parallel", "resolver")
+                _narrate(scan_id, f"Blast-dispatched {blast_count} seed resolvers + {len(_variants)} username variants in parallel", "resolver")
             # =====================================================================
 
             _turn_limit = _MAX_AGENT_TURNS_DEMO if config.demo_mode else _MAX_AGENT_TURNS

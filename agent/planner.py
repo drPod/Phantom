@@ -182,22 +182,50 @@ tool_use blocks for every actionable lead in a single response. If you must
 include text, keep it to one sentence. Never restate the brief."""
 
 
-_EMAIL_CONTEXT_BLOCK = """\
-
+_EMAIL_CONTEXT_BLOCK = """
 KNOWN IDENTITY CONTEXT
 
-The target is known to use email {email} — use this to disambiguate identity
-and skip leads belonging to different people. When a platform profile or
-username hit has metadata (display name, bio, location, language) that
-conflicts with this email address or its associated name/domain, treat it as a
-MISMATCH belonging to a different person and do not investigate further."""
+The target is CONFIRMED to use email {email}.
+{real_name_line}
+HARD RULES — enforce immediately, no exceptions:
 
+1. Any platform profile whose display name or bio clearly belongs to a
+   DIFFERENT person (different name, unrelated content, wrong language) is a
+   MISMATCH. Mark it and do NOT investigate any leads sourced from it.
+
+2. Do NOT chase emails found in breach data unless the email prefix OR domain
+   directly matches the confirmed identity. Breach DBs contain thousands of
+   unrelated users who happen to share the same username — those OTHER emails
+   are NOT this person. Investigating them wastes your entire entity budget.
+
+3. ALWAYS enumerate username variants early. After the first enumerate_username
+   result, immediately also run enumerate_username on common variants:
+   - Replace dots with underscores: dr.pod -> dr_pod
+   - Replace dots with nothing: dr.pod -> drpod
+   - Common leet: DrPod -> DrP0d
+   - Add/remove separators: drpod -> dr-pod, dr_pod, dr.pod
+   This is how the same person uses different handles across platforms.
+
+4. Confirmed identity signals to ACCEPT (these are THIS person):
+   - Profile bio/description mentions the confirmed email domain
+   - Display name matches the real name or username variation
+   - Profile links to other confirmed accounts (GitHub, etc.)
+
+5. Identity signals to REJECT as MISMATCH:
+   - Display name is clearly a different real-world person
+   - Profile language/location is completely inconsistent
+   - Username appears only in a breach record, not as a platform profile"""
+
+
+_REAL_NAME_LINE = "The target's real name is {real_name} — only accept profiles where the display name or bio is consistent with this person."
+_NO_NAME_LINE = "Use the confirmed email and username as the primary identity anchors."
 
 def format_system_prompt(
     max_depth: int,
     max_entities: int,
     scan_id: str,
     email: str | None = None,
+    real_name: str | None = None,
 ) -> str:
     base = PLANNER_SYSTEM_PROMPT.format(
         max_depth=max_depth,
@@ -205,7 +233,11 @@ def format_system_prompt(
         scan_id=scan_id,
     )
     if email:
-        base += _EMAIL_CONTEXT_BLOCK.format(email=email)
+        name_line = (
+            _REAL_NAME_LINE.format(real_name=real_name)
+            if real_name else _NO_NAME_LINE
+        )
+        base += _EMAIL_CONTEXT_BLOCK.format(email=email, real_name_line=name_line)
     return base
 
 
