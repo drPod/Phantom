@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from anthropic import Anthropic
+if TYPE_CHECKING:
+    from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 

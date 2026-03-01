@@ -66,27 +66,11 @@ RESOLVE_GITHUB = _tool(
     name="resolve_github",
     description=(
         "Lightweight GitHub profile probe: public email, blog URL, bio. "
-        "Surfaces: emails, domains. "
-        "Use as a quick check before committing to resolve_github_deep."
+        "Surfaces: emails, domains."
     ),
     entity_types=["username"],
 )
 
-RESOLVE_GITHUB_DEEP = _tool(
-    name="resolve_github_deep",
-    description=(
-        "Exhaustive GitHub intelligence: every committer email across all repos, "
-        "collaborator usernames from shared repos, timezone/work-schedule inference, "
-        "org memberships, starred repos, gists, README/bio parsing, followers and "
-        "following lists. "
-        "Surfaces: emails, domains, usernames (collaborators, org members, README "
-        "mentions) — child entities written directly to the graph as nodes. "
-        "Chain: run resolve_email + resolve_breach on commit emails that differ from "
-        "the profile email; run resolve_social + enumerate_username on active "
-        "collaborator usernames."
-    ),
-    entity_types=["username"],
-)
 
 ENUMERATE_USERNAME = _tool(
     name="enumerate_username",
@@ -95,7 +79,7 @@ ENUMERATE_USERNAME = _tool(
         "profile URLs with scraped display names, bios, avatars, follower counts. "
         "Leaf resolver — does NOT discover new entities. "
         "A hit count of 10+ signals a strong, consistent handle worth deep-diving "
-        "with resolve_social + resolve_github_deep."
+        "with resolve_social."
     ),
     entity_types=["username"],
 )
@@ -235,7 +219,6 @@ FINISH_INVESTIGATION: dict[str, Any] = {
 
 RESOLVER_TOOLS: list[dict[str, Any]] = [
     RESOLVE_GITHUB,
-    RESOLVE_GITHUB_DEEP,
     ENUMERATE_USERNAME,
     RESOLVE_SOCIAL,
     RESOLVE_EMAIL,
@@ -250,7 +233,6 @@ ALL_TOOLS: list[dict[str, Any]] = RESOLVER_TOOLS + [FINISH_INVESTIGATION]
 
 TOOL_NAME_TO_RESOLVER: dict[str, str] = {
     "resolve_github": "resolvers.username.resolve_github",
-    "resolve_github_deep": "resolvers.github_deep.resolve_github_deep",
     "enumerate_username": "resolvers.username_enum.enumerate_username",
     "resolve_social": "resolvers.social.resolve_social",
     "resolve_email": "resolvers.email.resolve_email",

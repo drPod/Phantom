@@ -628,6 +628,8 @@ def enumerate_username(
     # Expand each confirmed profile hit into its own graph node and edge
     platform_edges: list[dict[str, Any]] = []
     for hit in hits:
+        if hit.get("identity_mismatch", False):
+            continue
         site_name = (hit.get("site_name") or "").strip()
         platform_node_id = f"platform:{site_name.lower()}:{username.lower()}"
         platform_node_payload = {

@@ -81,6 +81,7 @@ class ScanResult(BaseModel):
 class SeedRequest(BaseModel):
     type: EntityType
     value: str
+    email: str | None = None
 
 
 class ScanRequest(BaseModel):

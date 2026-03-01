@@ -45,7 +45,6 @@ import resolvers.username  # noqa: F401
 import resolvers.email  # noqa: F401
 import resolvers.domain  # noqa: F401
 import resolvers.username_enum  # noqa: F401
-import resolvers.github_deep  # noqa: F401
 import resolvers.breach  # noqa: F401
 import resolvers.social  # noqa: F401
 import resolvers.identity_correlator  # noqa: F401

@@ -9,6 +9,7 @@ zero-cost, type-aware metadata collapsing for graph-context input.
 from __future__ import annotations
 
 import logging
+import threading
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -34,6 +35,7 @@ class GraphState:
 
     def __init__(self, scan_id: str) -> None:
         self.scan_id = scan_id
+        self._lock = threading.Lock()
         self._nodes: dict[str, dict[str, Any]] = {}
         self._edge_batches: dict[str, list[dict[str, Any]]] = {}
         self._seen_keys: set[str] = set()
@@ -57,39 +59,40 @@ class GraphState:
 
     def sync_from_dict(self, snapshot: dict[str, Any]) -> DiffResult:
         """Diff *snapshot* against previously seen state; update internal copy."""
-        current_keys = set(snapshot.keys())
-        prev_keys = set(self._seen_keys)
+        with self._lock:
+            current_keys = set(snapshot.keys())
+            prev_keys = set(self._seen_keys)
 
-        new_keys = current_keys - prev_keys
-        removed_keys = sorted(prev_keys - current_keys)
+            new_keys = current_keys - prev_keys
+            removed_keys = sorted(prev_keys - current_keys)
 
-        new_nodes: list[dict[str, Any]] = []
-        new_edges: list[dict[str, Any]] = []
+            new_nodes: list[dict[str, Any]] = []
+            new_edges: list[dict[str, Any]] = []
 
-        for key in sorted(current_keys):
-            val = snapshot[key]
-            if key.startswith(NODE_PREFIX) and isinstance(val, dict):
-                self._nodes[key] = val
-                if key in new_keys:
-                    new_nodes.append(val)
-            elif key.startswith(EDGES_BATCH_PREFIX) and isinstance(val, list):
-                self._edge_batches[key] = val
-                if key in new_keys:
-                    new_edges.extend(val)
+            for key in sorted(current_keys):
+                val = snapshot[key]
+                if key.startswith(NODE_PREFIX) and isinstance(val, dict):
+                    self._nodes[key] = val
+                    if key in new_keys:
+                        new_nodes.append(val)
+                elif key.startswith(EDGES_BATCH_PREFIX) and isinstance(val, list):
+                    self._edge_batches[key] = val
+                    if key in new_keys:
+                        new_edges.extend(val)
 
-        for rk in removed_keys:
-            self._nodes.pop(rk, None)
-            self._edge_batches.pop(rk, None)
+            for rk in removed_keys:
+                self._nodes.pop(rk, None)
+                self._edge_batches.pop(rk, None)
 
-        self._seen_keys = current_keys
+            self._seen_keys = current_keys
 
-        return DiffResult(
-            new_nodes=new_nodes,
-            new_edges=new_edges,
-            removed_keys=removed_keys,
-            total_nodes=self.node_count,
-            total_edges=self.edge_count,
-        )
+            return DiffResult(
+                new_nodes=new_nodes,
+                new_edges=new_edges,
+                removed_keys=removed_keys,
+                total_nodes=self.node_count,
+                total_edges=self.edge_count,
+            )
 
     # ------------------------------------------------------------------
     # Resolved-pair tracking
@@ -97,11 +100,13 @@ class GraphState:
 
     def mark_resolved(self, resolver: str, entity_key: str) -> None:
         """Record that *resolver* has been run on *entity_key*."""
-        self._resolved_pairs.add(f"{resolver}:{entity_key}")
+        with self._lock:
+            self._resolved_pairs.add(f"{resolver}:{entity_key}")
 
     def is_resolved(self, resolver: str, entity_key: str) -> bool:
         """Check whether *resolver* has already been run on *entity_key*."""
-        return f"{resolver}:{entity_key}" in self._resolved_pairs
+        with self._lock:
+            return f"{resolver}:{entity_key}" in self._resolved_pairs
 
     # ------------------------------------------------------------------
     # Public summary methods
@@ -109,18 +114,20 @@ class GraphState:
 
     def full_summary(self) -> str:
         """Deterministic Tier 1 compressed summary of the entire graph."""
-        all_nodes = list(self._nodes.values())
-        all_edges = self._all_edges()
-        return self._tier1_summary(all_nodes, all_edges, label="FULL")
+        with self._lock:
+            all_nodes = list(self._nodes.values())
+            all_edges = self._all_edges()
+            return self._tier1_summary(all_nodes, all_edges, label="FULL")
 
     def diff_summary(self, diff: DiffResult) -> str:
         """Deterministic Tier 1 compressed summary of what changed."""
         if not diff.new_nodes and not diff.new_edges and not diff.removed_keys:
             return "DIFF: no changes"
-        return self._tier1_summary(
-            diff.new_nodes, diff.new_edges, label="DIFF",
-            extra_header=self._diff_header(diff),
-        )
+        with self._lock:
+            return self._tier1_summary(
+                diff.new_nodes, diff.new_edges, label="DIFF",
+                extra_header=self._diff_header(diff),
+            )
 
     # ------------------------------------------------------------------
     # Tier 1 — deterministic compression

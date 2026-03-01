@@ -21,6 +21,10 @@ def write_stream_event(scan_id: str, event_type: str, payload: dict[str, Any]) -
         return
     try:
         sd = modal.Dict.from_name(f"{_STREAM_PREFIX}{scan_id}", create_if_missing=True)
+        # next_seq has a benign read-then-write race under concurrency: two
+        # callers may read the same seq and both increment to the same value.
+        # This is acceptable because event keys are UUID-based so no data is
+        # lost — only the seq counter may have duplicates or small gaps.
         seq: int = sd.get("next_seq", 0)
         sd["next_seq"] = seq + 1
         sd[f"evt_{uuid.uuid4().hex}"] = {

@@ -128,19 +128,6 @@
     #seed-input:focus { border-color: var(--accent); }
     #seed-input::placeholder { color: var(--text2); }
 
-    #seed-type {
-      background: var(--bg3);
-      border: 1px solid var(--border2);
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 12px;
-      padding: 7px 10px;
-      border-radius: 3px;
-      outline: none;
-      cursor: pointer;
-      letter-spacing: 1px;
-    }
-    #seed-type option { background: var(--bg2); }
 
     #scan-btn {
       background: var(--accent);
@@ -158,8 +145,24 @@
     #scan-btn:hover  { opacity: 0.85; box-shadow: 0 0 12px rgba(74,158,255,0.5); }
     #scan-btn:active { opacity: 0.7; }
     #scan-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    #seed-type:disabled { opacity: 0.5; cursor: not-allowed; }
     #seed-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #email-hint {
+      flex: 0 0 auto;
+      width: 220px;
+      background: var(--bg3);
+      border: 1px dashed var(--border2);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 7px 12px;
+      border-radius: 3px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #email-hint:focus { border-color: var(--accent); }
+    #email-hint::placeholder { color: var(--text2); opacity: 0.6; }
+    #email-hint:disabled { opacity: 0.5; cursor: not-allowed; }
 
     #demo-btn {
       background: transparent;
@@ -654,6 +657,45 @@
     .narration-msg.cat-complete   { color: var(--success); }
     .narration-msg.cat-info       { color: var(--text2); }
 
+    /* ── resolver progress bar ────────────────────────────────── */
+    #resolver-progress {
+      flex: 0 0 auto;
+      height: 22px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 14px;
+      font-family: var(--font);
+      font-size: 10px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+    #resolver-progress.hidden { display: none; }
+
+    .rp-seg {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .rp-seg::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .rp-seg.active::before  { background: var(--accent); }
+    .rp-seg.completed::before { background: var(--success); }
+    .rp-seg.failed::before  { background: var(--warn); }
+    .rp-seg.total::before   { display: none; }
+
+    .rp-seg.active    { color: var(--accent); }
+    .rp-seg.completed { color: var(--success); }
+    .rp-seg.failed    { color: var(--warn); }
+    .rp-seg.total     { color: var(--text2); }
+
     /* ── D3 graph styles ────────────────────────────────────────── */
     .link {
       stroke-opacity: 0.55;
@@ -899,6 +941,157 @@
     }
     #debug-stats-section .stat-row { margin-bottom: 4px; }
     #debug-stats-section .stat-row span { color: var(--text); }
+
+    /* ── agent transcript panel ──────────────────────────────────── */
+    #transcript-toggle {
+      background: transparent;
+      border: 1px solid #1ABC9C;
+      color: #1ABC9C;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      padding: 8px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+      margin-right: 6px;
+    }
+    #transcript-toggle:hover {
+      background: rgba(26,188,156,0.1);
+      box-shadow: 0 0 10px rgba(26,188,156,0.3);
+    }
+    #transcript-toggle.active {
+      background: rgba(26,188,156,0.25);
+      border-color: #1ABC9C;
+      box-shadow: 0 0 8px rgba(26,188,156,0.4);
+    }
+
+    #transcript-panel {
+      position: fixed;
+      right: 0;
+      top: 96px;
+      width: 420px;
+      height: calc(100vh - 96px);
+      background: var(--bg);
+      border-left: 1px solid var(--border);
+      z-index: 9998;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(100%);
+      transition: transform 0.2s ease-out;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.4);
+    }
+    #transcript-panel.open {
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+    #transcript-panel:not(.open) {
+      pointer-events: none;
+    }
+
+    #transcript-panel .section-title {
+      flex: 0 0 auto;
+      padding: 10px 14px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: #1ABC9C;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+
+    #transcript-feed {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-family: var(--font);
+      scrollbar-width: thin;
+      scrollbar-color: var(--border2) transparent;
+    }
+
+    .transcript-entry {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(26,39,68,0.5);
+      line-height: 1.5;
+    }
+    .transcript-entry .ts {
+      color: var(--text2);
+      font-size: 9px;
+      margin-right: 6px;
+    }
+    .transcript-entry .badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      padding: 1px 5px;
+      border-radius: 2px;
+      margin-right: 6px;
+    }
+    .transcript-entry .badge.planner {
+      background: rgba(26,188,156,0.2);
+      color: #1ABC9C;
+      border: 1px solid rgba(26,188,156,0.35);
+    }
+    .transcript-entry .badge.analyst {
+      background: rgba(241,196,15,0.15);
+      color: var(--gold);
+      border: 1px solid rgba(241,196,15,0.3);
+    }
+    .transcript-entry .tool-name {
+      color: #1ABC9C;
+      font-weight: bold;
+    }
+    .transcript-entry .tool-args {
+      display: block;
+      margin-top: 3px;
+      padding: 4px 6px;
+      background: rgba(0,0,0,0.25);
+      border-radius: 3px;
+      font-size: 10px;
+      color: var(--text2);
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 80px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: max-height 0.2s ease;
+    }
+    .transcript-entry .tool-args.expanded {
+      max-height: none;
+    }
+    .transcript-entry .brief-text {
+      display: block;
+      margin-top: 3px;
+      padding: 4px 6px;
+      background: rgba(0,0,0,0.2);
+      border-left: 2px solid var(--gold);
+      border-radius: 0 3px 3px 0;
+      font-size: 10px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 100px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: max-height 0.2s ease;
+    }
+    .transcript-entry .brief-text.expanded {
+      max-height: none;
+    }
+    .transcript-entry .brief-meta {
+      font-size: 9px;
+      color: var(--text2);
+      margin-left: 4px;
+    }
+    .transcript-placeholder {
+      padding: 12px;
+      color: var(--text2);
+      font-size: 11px;
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -915,26 +1108,29 @@
       <div id="sse-dot" class="idle"></div>
       <span id="sse-label">IDLE</span>
     </div>
+    <button id="transcript-toggle">AGENT</button>
     <button id="debug-toggle">DEBUG</button>
   </div>
 
   <!-- ── input row ────────────────────────────────────────────────── -->
   <div id="input-row">
-    <input id="seed-input" type="text" placeholder="target identifier (username, email, domain…)" spellcheck="false" />
-    <select id="seed-type">
-      <option value="username">USERNAME</option>
-      <option value="email">EMAIL</option>
-      <option value="domain">DOMAIN</option>
-      <option value="phone">PHONE</option>
-      <option value="wallet">WALLET</option>
-    </select>
+    <input id="seed-input" type="text" placeholder="Enter username" spellcheck="false" />
+    <input id="email-hint" type="email" placeholder="Email (optional)" spellcheck="false" />
     <button id="scan-btn">SCAN</button>
-    <button id="demo-btn">⚡ DEMO</button>
+    <button id="demo-btn">DEMO</button>
     <button id="stop-btn" class="hidden" disabled>STOP</button>
   </div>
 
   <!-- ── narration feed ──────────────────────────────────────────── -->
   <div id="narration-feed" class="hidden"></div>
+
+  <!-- ── resolver progress ─────────────────────────────────────── -->
+  <div id="resolver-progress" class="hidden">
+    <span id="rp-active" class="rp-seg active">0 active</span>
+    <span id="rp-completed" class="rp-seg completed">0 done</span>
+    <span id="rp-failed" class="rp-seg failed"></span>
+    <span id="rp-total" class="rp-seg total">/ 0 total</span>
+  </div>
 
   <!-- ── main ─────────────────────────────────────────────────────── -->
   <div id="main">
@@ -1019,6 +1215,14 @@
       <div class="stat-row">Discovered / Skipped: <span id="debug-stat-entities">—</span></div>
       <div class="stat-row">Progress: <span id="debug-stat-progress">—</span></div>
       <div class="stat-row" style="margin-top:8px;font-size:9px;word-break:break-all;color:var(--text2);">API: <span id="debug-stat-api" title="Add ?api=URL to override">—</span></div>
+    </div>
+  </div>
+
+  <!-- ── agent transcript panel (overlay) ─────────────────────────── -->
+  <div id="transcript-panel">
+    <div class="section-title">AGENT TRANSCRIPT</div>
+    <div id="transcript-feed">
+      <div class="transcript-placeholder">No active scan. Start a scan to see agent decisions.</div>
     </div>
   </div>
 
@@ -1123,6 +1327,7 @@ const resolversSeen = new Set();   // unique resolver sources
 let   nodes         = [];
 let   links         = [];
 const pendingEdges  = [];          // edges buffered until both endpoints exist
+let lastResolverProgress = { active: 0, completed: 0, failed: 0, total: 0 };
 
 // Debug panel state
 let debugPanelOpen   = false;
@@ -1130,6 +1335,10 @@ let debugPollTimer   = null;
 let debugActivityLog = [];        // merged from REST + SSE
 let debugResolverRows = [];       // derived from activity log
 let debugFeedNearBottom = true;   // for auto-scroll
+
+// Agent transcript panel state
+let transcriptPanelOpen = false;
+let transcriptLog       = [];
 
 // ════════════════════════════════════════════════════════════════════
 //  D3 SETUP
@@ -1724,9 +1933,13 @@ const elScanId    = document.getElementById('stat-scanid');
 const exportBtn   = document.getElementById('export-btn');
 
 function updateStats() {
-  elNodes.textContent     = nodesMap.size;
-  elEdges.textContent     = links.length;
-  elResolvers.textContent = resolversSeen.size;
+  elNodes.textContent = nodesMap.size;
+  elEdges.textContent = links.length;
+  if (lastResolverProgress.total > 0) {
+    elResolvers.textContent = `${lastResolverProgress.completed}/${lastResolverProgress.total}`;
+  } else {
+    elResolvers.textContent = resolversSeen.size;
+  }
 }
 
 function startElapsedTimer() {
@@ -1762,6 +1975,139 @@ debugToggle.addEventListener('click', () => {
     stopDebugPolling();
   }
 });
+
+// ════════════════════════════════════════════════════════════════════
+//  AGENT TRANSCRIPT PANEL
+// ════════════════════════════════════════════════════════════════════
+const transcriptToggle = document.getElementById('transcript-toggle');
+const transcriptPanel  = document.getElementById('transcript-panel');
+const transcriptFeedEl = document.getElementById('transcript-feed');
+
+transcriptToggle.addEventListener('click', () => {
+  transcriptPanelOpen = !transcriptPanelOpen;
+  transcriptPanel.classList.toggle('open', transcriptPanelOpen);
+  transcriptToggle.classList.toggle('active', transcriptPanelOpen);
+});
+
+function formatTranscriptTs(ts) {
+  if (!ts) return '--:--:--';
+  const d = new Date(ts * 1000);
+  return d.toTimeString().slice(0, 8);
+}
+
+function truncateJson(obj, maxLen) {
+  const s = JSON.stringify(obj, null, 2);
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen) + '\n…';
+}
+
+function updateTranscriptFeed() {
+  const wasNearBottom = transcriptFeedEl.scrollHeight - transcriptFeedEl.scrollTop - transcriptFeedEl.clientHeight < 50;
+
+  transcriptFeedEl.querySelectorAll('.transcript-placeholder').forEach(el => el.remove());
+
+  while (transcriptFeedEl.children.length < transcriptLog.length) {
+    const idx = transcriptFeedEl.children.length;
+    const entry = transcriptLog[idx];
+    const div = document.createElement('div');
+    div.className = 'transcript-entry';
+
+    const ts = document.createElement('span');
+    ts.className = 'ts';
+    ts.textContent = `[${formatTranscriptTs(entry.ts)}]`;
+    div.appendChild(ts);
+
+    if (entry.type === 'planner_action') {
+      const badge = document.createElement('span');
+      badge.className = 'badge planner';
+      badge.textContent = 'PLANNER';
+      div.appendChild(badge);
+
+      const toolSpan = document.createElement('span');
+      toolSpan.className = 'tool-name';
+      toolSpan.textContent = entry.payload.tool;
+      div.appendChild(toolSpan);
+
+      if (entry.payload.input && Object.keys(entry.payload.input).length > 0) {
+        const args = document.createElement('code');
+        args.className = 'tool-args';
+        args.textContent = truncateJson(entry.payload.input, 300);
+        args.addEventListener('click', () => {
+          if (args.classList.contains('expanded')) {
+            args.classList.remove('expanded');
+            args.textContent = truncateJson(entry.payload.input, 300);
+          } else {
+            args.classList.add('expanded');
+            args.textContent = JSON.stringify(entry.payload.input, null, 2);
+          }
+        });
+        div.appendChild(args);
+      }
+    } else if (entry.type === 'analyst_brief') {
+      const badge = document.createElement('span');
+      badge.className = 'badge analyst';
+      badge.textContent = entry.payload.background ? 'ANALYST (BG)' : 'ANALYST';
+      div.appendChild(badge);
+
+      const meta = document.createElement('span');
+      meta.className = 'brief-meta';
+      meta.textContent = `+${entry.payload.new_nodes || 0} nodes, +${entry.payload.new_edges || 0} edges`;
+      div.appendChild(meta);
+
+      const briefEl = document.createElement('div');
+      briefEl.className = 'brief-text';
+      briefEl.textContent = entry.payload.brief || '(empty brief)';
+      briefEl.addEventListener('click', () => {
+        briefEl.classList.toggle('expanded');
+      });
+      div.appendChild(briefEl);
+    } else if (entry.type === 'planner_status') {
+      const badge = document.createElement('span');
+      badge.className = 'badge planner';
+      badge.textContent = 'STATUS';
+      div.appendChild(badge);
+
+      const reason = document.createElement('span');
+      reason.className = 'tool-name';
+      reason.textContent = `Planner stopped: ${entry.payload.stop_reason || 'unknown'}`;
+      div.appendChild(reason);
+
+      if (entry.payload.message) {
+        const msg = document.createElement('div');
+        msg.className = 'brief-text';
+        msg.textContent = entry.payload.message;
+        div.appendChild(msg);
+      }
+    }
+
+    transcriptFeedEl.appendChild(div);
+  }
+
+  if (transcriptLog.length === 0) {
+    updateTranscriptPlaceholder();
+  }
+
+  if (wasNearBottom) transcriptFeedEl.scrollTop = transcriptFeedEl.scrollHeight;
+}
+
+function updateTranscriptPlaceholder() {
+  if (transcriptLog.length > 0) return;
+  transcriptFeedEl.querySelectorAll('.transcript-placeholder').forEach(el => el.remove());
+  const p = document.createElement('div');
+  p.className = 'transcript-placeholder';
+  if (currentScanId && !scanCompleted) {
+    p.textContent = 'Waiting for agent decisions\u2026';
+  } else {
+    p.textContent = 'No active scan. Start a scan to see agent decisions.';
+  }
+  transcriptFeedEl.appendChild(p);
+}
+
+function resetTranscriptPanel() {
+  transcriptLog = [];
+  transcriptFeedEl.innerHTML = '';
+  updateTranscriptPlaceholder();
+}
 
 function buildResolverRowsFromLog(activityLog) {
   const rows = [];
@@ -2090,7 +2436,7 @@ const scanBtn  = document.getElementById('scan-btn');
 const demoBtn  = document.getElementById('demo-btn');
 const stopBtn  = document.getElementById('stop-btn');
 const seedInput = document.getElementById('seed-input');
-const seedType  = document.getElementById('seed-type');
+const emailHint = document.getElementById('email-hint');
 
 scanBtn.addEventListener('click', startScan);
 stopBtn.addEventListener('click', stopScan);
@@ -2100,13 +2446,14 @@ seedInput.addEventListener('keydown', e => {
 
 demoBtn.addEventListener('click', () => {
   seedInput.value = 'drPod';
-  seedType.value  = 'username';
+  emailHint.value = 'darsh.pod@gmail.com';
   startScan();
 });
 
 function startScan() {
   const seed = seedInput.value.trim();
-  const type = seedType.value;
+  const type = 'username';
+  const email = emailHint.value.trim() || null;
   if (!seed) {
     seedInput.classList.add('shake');
     setTimeout(() => seedInput.classList.remove('shake'), 500);
@@ -2123,15 +2470,17 @@ function startScan() {
   updateGraph();
   collapseSidebar();
   resetDebugPanel();
+  resetTranscriptPanel();
   resetReport();
   resetNarrationFeed();
+  resetResolverProgress();
   exportBtn.style.display = 'none';
   scanBtn.disabled  = true;
   demoBtn.disabled  = true;
   stopBtn.classList.remove('hidden');
   stopBtn.disabled  = false;
-  seedType.disabled = true;
   seedInput.disabled = true;
+  emailHint.disabled = true;
   elNodes.textContent     = '0';
   elEdges.textContent     = '0';
   elResolvers.textContent = '0';
@@ -2142,7 +2491,7 @@ function startScan() {
   fetch(API_BASE_URL + '/scan', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ seed: { type, value: seed } }),
+    body:    JSON.stringify({ seed: { type, value: seed, email } }),
   })
     .then(r => { if (!r.ok) throw new Error(`POST /scan failed: ${r.status}`); return r.json(); })
     .then(data => {
@@ -2160,8 +2509,8 @@ function startScan() {
       demoBtn.disabled = false;
       stopBtn.classList.add('hidden');
       stopBtn.disabled = true;
-      seedType.disabled = false;
       seedInput.disabled = false;
+      emailHint.disabled = false;
       stopElapsedTimer();
     });
 }
@@ -2225,20 +2574,25 @@ function handleEvent(data) {
     addEdge(data.payload);
   } else if (data.type === 'resolver_status') {
     handleResolverStatus(data.payload);
+  } else if (data.type === 'resolver_progress') {
+    handleResolverProgress(data.payload);
   } else if (data.type === 'status') {
     handleStatus(data.payload);
   } else if (data.type === 'report') {
     handleReportEvent(data.payload);
   } else if (data.type === 'narration') {
     handleNarration(data.payload);
+  } else if (data.type === 'planner_action' || data.type === 'analyst_brief' || data.type === 'planner_status') {
+    transcriptLog.push({ type: data.type, payload: data.payload, ts: data.ts });
+    updateTranscriptFeed();
   } else if (data.type === 'error') {
     setSseStatus('error');
     scanBtn.disabled = false;
     demoBtn.disabled = false;
     stopBtn.classList.add('hidden');
     stopBtn.disabled = true;
-    seedType.disabled = false;
     seedInput.disabled = false;
+    emailHint.disabled = false;
     stopElapsedTimer();
   }
 }
@@ -2340,8 +2694,8 @@ function handleStatus(payload) {
     demoBtn.disabled = false;
     stopBtn.classList.add('hidden');
     stopBtn.disabled = true;
-    seedType.disabled = false;
     seedInput.disabled = false;
+    emailHint.disabled = false;
     if (eventSource) { eventSource.close(); eventSource = null; }
 
     if (status === 'completed' || status === 'cancelled') {
@@ -2365,8 +2719,7 @@ function handleStatus(payload) {
             .catch(() => {});
         }, 5000);
       }
-      // Hide narration feed after a short delay
-      setTimeout(() => resetNarrationFeed(), 4000);
+      setTimeout(() => { resetNarrationFeed(); resetResolverProgress(); }, 4000);
       // Auto-fit graph after simulation settles
       setTimeout(() => zoomToFit(60), 1800);
     }
@@ -2512,6 +2865,47 @@ function handleNarration(payload) {
 function resetNarrationFeed() {
   narrationFeedEl.innerHTML = '';
   narrationFeedEl.classList.add('hidden');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  RESOLVER PROGRESS BAR
+// ════════════════════════════════════════════════════════════════════
+const resolverProgressEl = document.getElementById('resolver-progress');
+const rpActiveEl    = document.getElementById('rp-active');
+const rpCompletedEl = document.getElementById('rp-completed');
+const rpFailedEl    = document.getElementById('rp-failed');
+const rpTotalEl     = document.getElementById('rp-total');
+
+function handleResolverProgress(payload) {
+  if (!payload) return;
+  lastResolverProgress = {
+    active:    payload.active    ?? 0,
+    completed: payload.completed ?? 0,
+    failed:    payload.failed    ?? 0,
+    total:     payload.total     ?? 0,
+  };
+
+  resolverProgressEl.classList.remove('hidden');
+  rpActiveEl.textContent    = `${lastResolverProgress.active} active`;
+  rpCompletedEl.textContent = `${lastResolverProgress.completed} done`;
+  rpTotalEl.textContent     = `/ ${lastResolverProgress.total} total`;
+
+  if (lastResolverProgress.failed > 0) {
+    rpFailedEl.textContent = `${lastResolverProgress.failed} failed`;
+  } else {
+    rpFailedEl.textContent = '';
+  }
+
+  updateStats();
+}
+
+function resetResolverProgress() {
+  lastResolverProgress = { active: 0, completed: 0, failed: 0, total: 0 };
+  rpActiveEl.textContent    = '0 active';
+  rpCompletedEl.textContent = '0 done';
+  rpFailedEl.textContent    = '';
+  rpTotalEl.textContent     = '/ 0 total';
+  resolverProgressEl.classList.add('hidden');
 }
 </script>
 </body>

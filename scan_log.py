@@ -44,6 +44,10 @@ def log_scan_event(scan_id: str, event_type: str, **kwargs: Any) -> None:
         return
     try:
         ld = modal.Dict.from_name(f"{_LOG_PREFIX}{scan_id}", create_if_missing=True)
+        # next_seq has a benign read-then-write race under concurrency: two
+        # callers may read the same seq and both increment to the same value.
+        # This is acceptable because log keys include a UUID suffix so no
+        # events are lost — only the seq counter may have duplicates or gaps.
         seq: int = ld.get("next_seq", 0)
         ld["next_seq"] = seq + 1
         ts = time.time()
