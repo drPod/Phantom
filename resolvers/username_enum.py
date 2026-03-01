@@ -326,11 +326,15 @@ def _fallback_distill(raw_profiles: list[dict]) -> list[dict]:
     return distilled
 
 
-def _distill_profiles(raw_profiles: list[dict], username: str) -> list[dict]:
+def _distill_profiles(raw_profiles: list[dict], username: str, real_name: str | None = None, seed_email: str | None = None) -> list[dict]:
     """Call Claude Haiku to distill raw scraped profiles into structured identity fields.
 
     Batches all profiles into a single API call. Falls back to deterministic
     heuristics if the call fails or times out.
+
+    real_name and seed_email, when provided, are injected into the system prompt
+    so the model can correctly flag identity_mismatch=true for profiles belonging
+    to a different person (e.g. "Andrew Harvey" != "Darsh Poddar" for username drPod).
     """
     if not raw_profiles:
         return []
@@ -381,10 +385,34 @@ def _distill_profiles(raw_profiles: list[dict], username: str) -> list[dict]:
                 lo, len(raw_profiles),
             )
 
+        # Build the identity disambiguation context block.
+        # This is the key mechanism that lets the distiller reject profiles belonging
+        # to other people who share the same username (e.g. Andrew Harvey != Darsh Poddar).
+        identity_context_parts: list[str] = []
+        if real_name:
+            identity_context_parts.append(
+                f"  - Real name: \"{real_name}\" — display_name MUST be consistent with "
+                f"this person. If the display_name or bio clearly identifies a DIFFERENT "
+                f"real-world person (different name, different context), set identity_mismatch=true."
+            )
+        if seed_email:
+            email_domain = seed_email.split("@")[-1] if "@" in seed_email else ""
+            identity_context_parts.append(
+                f"  - Known email: \"{seed_email}\" (domain: {email_domain}) — "
+                f"profiles mentioning this email or domain are more likely to be the target."
+            )
+        if not identity_context_parts:
+            identity_context_parts.append(
+                f"  - Only the username \"{username}\" is known. Flag obvious mismatches "
+                f"(e.g. display_name is a clearly famous/well-known different person)."
+            )
+        identity_context = "CONFIRMED IDENTITY CONTEXT (use for identity_mismatch detection):\n" + "\n".join(identity_context_parts)
+
         system_prompt = (
             "You are an OSINT identity analyst. You receive a JSON array of raw scraped "
             "profile pages for the username '{username}'. For each profile, extract only "
             "the fields that help confirm or cross-reference the person's real identity.\n\n"
+            + identity_context + "\n\n"
             "Return a JSON array (same length as input, same order) where each element has:\n"
             "  _idx: integer (from input, for alignment)\n"
             "  display_name: string or null — the person's display name on this platform\n"
@@ -394,8 +422,11 @@ def _distill_profiles(raw_profiles: list[dict], username: str) -> list[dict]:
             "  join_date: string or null — ISO date or human-readable date\n"
             "  linked_urls: array of up to 3 strings — external URLs linked from the profile "
             "that suggest identity (personal sites, other social profiles, etc.)\n"
-            "  identity_mismatch: boolean — true if display_name or bio strongly suggests "
-            "this is a DIFFERENT person than the username '{username}'\n\n"
+            "  identity_mismatch: boolean — true ONLY if the display_name or bio clearly "
+            "identifies this as a DIFFERENT real-world person than the confirmed identity above. "
+            "Default to false when uncertain; only flag when the mismatch is obvious (a clearly "
+            "different named person, completely unrelated bio, or explicit contradiction of the "
+            "known real_name).\n\n"
             "Rules:\n"
             "- Drop navigation links, cookie banners, generic platform boilerplate.\n"
             "- Prefer og:title/twitter:title over page_title for display_name.\n"
@@ -454,7 +485,7 @@ def _distill_profiles(raw_profiles: list[dict], username: str) -> list[dict]:
         return _fallback_distill(raw_profiles)
 
 
-async def _run_all_checks(username: str, sites: list[dict], deadline: float, scan_id: str = "") -> list[dict]:
+async def _run_all_checks(username: str, sites: list[dict], deadline: float, scan_id: str = "", real_name: str | None = None, seed_email: str | None = None) -> list[dict]:
     """Run site checks concurrently with a wall-clock deadline.
 
     Uses asyncio.wait instead of asyncio.gather so we can collect whatever
@@ -544,7 +575,7 @@ async def _run_all_checks(username: str, sites: list[dict], deadline: float, sca
             "message": f"enumerate_username: distilling {len(raw_scraped)} profile(s) with AI...",
             "category": "resolver",
         })
-        distilled = _distill_profiles(raw_scraped, username)
+        distilled = _distill_profiles(raw_scraped, username, real_name=real_name, seed_email=seed_email)
     else:
         logger.info("_run_all_checks: no time for distillation, using fallback")
         distilled = _fallback_distill(raw_scraped)
@@ -579,6 +610,17 @@ def enumerate_username(
     if not username:
         return
 
+    # Read disambiguation context stored by orchestrator so the distiller
+    # can correctly flag identity_mismatch for profiles of other people.
+    try:
+        real_name: str | None = d.get("__real_name__") if "__real_name__" in d else None
+    except Exception:
+        real_name = None
+    try:
+        seed_email: str | None = d.get("__seed_email__") if "__seed_email__" in d else None
+    except Exception:
+        seed_email = None
+
     sites = _load_wmn_sites()
     if not sites:
         logger.warning("No WhatsMyName sites available; skipping enumeration")
@@ -595,7 +637,7 @@ def enumerate_username(
     })
 
     deadline = wall_start + _WALL_CLOCK_BUDGET
-    hits = asyncio.run(_run_all_checks(username, sites, deadline, scan_id=scan_id))
+    hits = asyncio.run(_run_all_checks(username, sites, deadline, scan_id=scan_id, real_name=real_name, seed_email=seed_email))
 
     metadata: dict[str, Any] = {
         "username": username,

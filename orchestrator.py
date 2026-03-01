@@ -587,6 +587,19 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
 
         d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
 
+        # Store disambiguation context so resolvers can use it for identity_mismatch detection.
+        # Resolvers read __real_name__ and __seed_email__ from the scan Dict.
+        if real_name:
+            try:
+                d["__real_name__"] = real_name.strip()
+            except Exception:
+                pass
+        if email:
+            try:
+                d["__seed_email__"] = email.strip().lower()
+            except Exception:
+                pass
+
         seed_key = _entity_key(seed.type.value, seed.value)
         seed_node: dict[str, Any] = {
             "id": seed_key,

@@ -198,7 +198,15 @@ HARD RULES — enforce immediately, no exceptions:
    unrelated users who happen to share the same username — those OTHER emails
    are NOT this person. Investigating them wastes your entire entity budget.
 
-3. ALWAYS enumerate username variants early. After the first enumerate_username
+3. REJECT any platform profile immediately if its display_name is a clearly
+   different real-world person than the confirmed real name above. A profile
+   for "Andrew Harvey" or "Adam Podex" when the real name is "Darsh Poddar"
+   is a MISMATCH — do NOT investigate leads from it. The identity_mismatch
+   flag on platform_profile nodes reflects this; treat all MISMATCH-flagged
+   nodes as belonging to a completely different person and ignore all their
+   downstream entities.
+
+4. ALWAYS enumerate username variants early. After the first enumerate_username
    result, immediately also run enumerate_username on common variants:
    - Replace dots with underscores: dr.pod -> dr_pod
    - Replace dots with nothing: dr.pod -> drpod
@@ -206,12 +214,12 @@ HARD RULES — enforce immediately, no exceptions:
    - Add/remove separators: drpod -> dr-pod, dr_pod, dr.pod
    This is how the same person uses different handles across platforms.
 
-4. Confirmed identity signals to ACCEPT (these are THIS person):
+5. Confirmed identity signals to ACCEPT (these are THIS person):
    - Profile bio/description mentions the confirmed email domain
    - Display name matches the real name or username variation
    - Profile links to other confirmed accounts (GitHub, etc.)
 
-5. Identity signals to REJECT as MISMATCH:
+6. Identity signals to REJECT as MISMATCH:
    - Display name is clearly a different real-world person
    - Profile language/location is completely inconsistent
    - Username appears only in a breach record, not as a platform profile"""

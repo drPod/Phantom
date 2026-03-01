@@ -43,7 +43,13 @@ RULES
 • Preserve ALL entity identifiers (emails, usernames, domains) verbatim.
 • Highlight anything suggesting identity linkage or credential exposure.
 • Collapse large lists to count + top-3 examples.
-• Target ≤ {token_budget} tokens total. Ruthlessly cut low-value detail."""
+• Target ≤ {token_budget} tokens total. Ruthlessly cut low-value detail.
+• IDENTITY MISMATCH: if a platform_profile node has identity_mismatch=true in
+  its metadata, list it under LOW-VALUE / SKIP with reason "MISMATCH — different
+  person". Do NOT list any leads extracted from MISMATCH nodes under HIGH-VALUE
+  LEADS. If a real_name is known (check graph for __real_name__ seed), flag any
+  display_name that is clearly a different person as a MISMATCH even without the
+  explicit flag."""
 
 
 def _format_raw_nodes(nodes: list[dict[str, Any]]) -> str:
