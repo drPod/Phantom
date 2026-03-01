@@ -35,7 +35,9 @@ def build_from_dict(d: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(e, dict) and "source" in e and "target" in e:
                     edges.append(_normalize_edge(e))
 
-    edges = [e for e in edges if e["source"] in seen_node_ids and e["target"] in seen_node_ids]
+    edges = [e for e in edges if e["source"] in seen_node_ids
+             and e["target"] in seen_node_ids
+             and e["source"] != e["target"]]
 
     return {"nodes": nodes, "edges": edges}
 

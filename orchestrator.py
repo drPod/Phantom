@@ -262,13 +262,21 @@ def _log_harvest(
     completed: list[_RefMeta],
     failed: list[_RefMeta],
     scan_id: str,
+    nodes_found: int = 0,
+    edges_found: int = 0,
 ) -> None:
     """Log and narrate results from a harvest batch."""
-    for meta in completed:
+    n_completed = max(len(completed), 1)
+    n_per, n_rem = divmod(nodes_found, n_completed)
+    e_per, e_rem = divmod(edges_found, n_completed)
+    for i, meta in enumerate(completed):
+        n = n_per + (1 if i < n_rem else 0)
+        e = e_per + (1 if i < e_rem else 0)
         log_scan_event(
             scan_id, "resolver_completed",
             resolver=meta.resolver_name, entity_key=meta.entity_key,
             duration=meta.duration,
+            nodes_found=n, edges_found=e,
         )
         _narrate(
             scan_id,
@@ -529,18 +537,19 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
 
         d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
 
+        seed_key = _entity_key(seed.type.value, seed.value)
         seed_node: dict[str, Any] = {
-            "id": "seed",
+            "id": seed_key,
             "type": seed.type.value,
             "value": seed.value,
             "metadata": {"seed": True},
             "depth": 0,
         }
-        _safe_dict_put(d, f"{NODE_PREFIX}seed", seed_node, scan_id)
+        _safe_dict_put(d, f"{NODE_PREFIX}{seed_key}", seed_node, scan_id)
         write_stream_event(scan_id, "node", seed_node)
         _narrate(scan_id, f"Starting investigation of {seed.type.value}: {seed.value}", "start")
 
-        known_entities: set[str] = {"seed"}
+        known_entities: set[str] = {seed_key}
         entities_seen = 1  # seed counts
         state_lock = threading.Lock()  # guards entities_seen, known_entities, max_depth_reached
 
@@ -558,7 +567,7 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             _safe_dict_put(d, f"{NODE_PREFIX}{email_key}", email_node, scan_id)
             write_stream_event(scan_id, "node", email_node)
             email_edge_batch = [{
-                "source": "seed",
+                "source": seed_key,
                 "target": email_key,
                 "relationship": "known_email",
                 "confidence": 1.0,
@@ -635,10 +644,12 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     if bg_completed or bg_failed:
                         total_completed += len(bg_completed)
                         total_failed += len(bg_failed)
-                        _log_harvest(bg_completed, bg_failed, scan_id)
-                        _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
                         snapshot = _snapshot_dict(d, scan_id)
                         diff = graph_state.sync_from_dict(snapshot)
+                        _log_harvest(bg_completed, bg_failed, scan_id,
+                                     nodes_found=len(diff.new_nodes),
+                                     edges_found=len(diff.new_edges))
+                        _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
                         if diff.new_nodes or diff.new_edges:
                             prev_brief = _harvest_analyst_future(analyst_future, analyst_fallback_args)
 
@@ -755,7 +766,9 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     entity_val = str(raw_val).strip()
                     entity_type = inp.get("entity_type", "")
                     depth = inp.get("depth", 0)
-                    source_key = inp.get("source_entity_key", "seed")
+                    source_key = inp.get("source_entity_key", seed_key)
+                    if source_key == "seed":
+                        source_key = seed_key
                     ek = _entity_key(entity_type, entity_val)
 
                     if graph_state.is_resolved(block.name, ek):
@@ -799,14 +812,19 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     if completed or failed:
                         total_completed += len(completed)
                         total_failed += len(failed)
-                        _log_harvest(completed, failed, scan_id)
+                        snapshot = _snapshot_dict(d, scan_id)
+                        diff = graph_state.sync_from_dict(snapshot)
+                        _log_harvest(completed, failed, scan_id,
+                                     nodes_found=len(diff.new_nodes),
+                                     edges_found=len(diff.new_edges))
                         _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
                 else:
                     completed, failed = [], []
 
                 # ========== STEP 4: Sync graph + Analyst brief ==========
-                snapshot = _snapshot_dict(d, scan_id)
-                diff = graph_state.sync_from_dict(snapshot)
+                if not (completed or failed):
+                    snapshot = _snapshot_dict(d, scan_id)
+                    diff = graph_state.sync_from_dict(snapshot)
 
                 graph_payload = build_from_dict(snapshot)
 
@@ -919,7 +937,11 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 if drain_completed or drain_failed:
                     total_completed += len(drain_completed)
                     total_failed += len(drain_failed)
-                    _log_harvest(drain_completed, drain_failed, scan_id)
+                    drain_snapshot = _snapshot_dict(d, scan_id)
+                    drain_diff = graph_state.sync_from_dict(drain_snapshot)
+                    _log_harvest(drain_completed, drain_failed, scan_id,
+                                 nodes_found=len(drain_diff.new_nodes),
+                                 edges_found=len(drain_diff.new_edges))
                     _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
 
             # -- drain last analyst future so it doesn't leak --

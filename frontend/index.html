@@ -313,6 +313,65 @@
     .detail-key { color: var(--text2); font-size: 10px; letter-spacing: 1px; }
     .detail-val { color: var(--text); font-size: 12px; word-break: break-all; }
 
+    /* ── connected edges section ────────────────────────────────── */
+    .detail-section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 12px 0 10px;
+    }
+
+    .detail-section-title {
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--text2);
+      margin-bottom: 8px;
+    }
+
+    .detail-edge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 6px;
+      border-radius: 3px;
+      cursor: pointer;
+      margin-bottom: 3px;
+      transition: background 0.1s;
+    }
+    .detail-edge:hover { background: rgba(255,255,255,0.05); }
+
+    .edge-direction {
+      flex: 0 0 14px;
+      font-size: 11px;
+      color: var(--accent);
+      text-align: center;
+    }
+
+    .edge-other {
+      flex: 1 1 auto;
+      font-size: 11px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .edge-rel {
+      flex: 0 0 auto;
+      font-size: 9px;
+      color: var(--text2);
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
+    .edge-conf {
+      flex: 0 0 auto;
+      font-size: 9px;
+      background: var(--accent);
+      color: #fff;
+      padding: 1px 5px;
+      border-radius: 8px;
+    }
+
     /* ── collapsible metadata sections ─────────────────────────── */
     .meta-section { margin-bottom: 8px; }
 
@@ -723,8 +782,8 @@
       pointer-events: none;
     }
 
-    /* ── edge legend ─────────────────────────────────────────────── */
-    #edge-legend {
+    /* ── graph legend ────────────────────────────────────────────── */
+    #graph-legend {
       position: absolute;
       bottom: 12px;
       left: 14px;
@@ -1137,7 +1196,7 @@
     <div id="graph-wrap">
       <svg id="graph"></svg>
       <div id="tooltip"></div>
-      <div id="edge-legend">
+      <div id="graph-legend">
         <div class="legend-row">
           <svg width="26" height="10" style="flex-shrink:0">
             <line x1="0" y1="5" x2="26" y2="5" stroke="#4A9EFF" stroke-width="1.8" stroke-opacity="0.7"/>
@@ -1298,18 +1357,30 @@ function nodeRadius(d) {
   return 10;
 }
 
+function extractDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
+}
+
 function nodeLabel(d) {
   const emoji = TYPE_EMOJIS[d.type] || TYPE_EMOJIS.default;
   const v = d.value || d.id;
+  const meta = d.metadata || {};
   let display;
-  if (d.type === 'email' && v.includes('@')) {
-    const [user, domain] = v.split('@');
-    display = user.length > 8
-      ? user.slice(0, 7) + '…@' + (domain.length > 8 ? domain.slice(0, 7) + '…' : domain)
+
+  if (d.type === 'platform_profile') {
+    display = meta.site_name || meta.display_name || extractDomain(v) || v;
+  } else if (d.type === 'email' && v.includes('@')) {
+    const [user, dom] = v.split('@');
+    display = user.length > 10
+      ? user.slice(0, 9) + '…@' + (dom.length > 10 ? dom.slice(0, 9) + '…' : dom)
       : v;
+  } else if (v.startsWith('http://') || v.startsWith('https://')) {
+    display = extractDomain(v) || v;
   } else {
-    display = v.length > 15 ? v.slice(0, 13) + '…' : v;
+    display = v;
   }
+
+  if (display.length > 22) display = display.slice(0, 20) + '…';
   return `${emoji} ${display}`;
 }
 
@@ -1797,7 +1868,42 @@ function showSidebar(d) {
     html += renderMetaValue(k, v);
   }
 
+  // ── connected edges ──────────────────────────────────────────────
+  const connectedEdges = links.filter(l => {
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    return sid === d.id || tid === d.id;
+  });
+
+  if (connectedEdges.length > 0) {
+    html += `<div class="detail-section-divider"></div>`;
+    html += `<div class="detail-section-title">CONNECTIONS (${connectedEdges.length})</div>`;
+    connectedEdges.forEach(edge => {
+      const sid = typeof edge.source === 'object' ? edge.source.id : edge.source;
+      const tid = typeof edge.target === 'object' ? edge.target.id : edge.target;
+      const otherId   = sid === d.id ? tid : sid;
+      const direction = sid === d.id ? '→' : '←';
+      const otherNode = nodesMap.get(otherId);
+      const otherLabel = otherNode ? nodeLabel(otherNode) : otherId;
+      const rel  = edge.relationship || 'linked_to';
+      const conf = edge.confidence != null ? Math.round(edge.confidence * 100) + '%' : '';
+      html += `<div class="detail-edge" data-node-id="${escHtml(otherId)}">` +
+        `<span class="edge-direction">${direction}</span>` +
+        `<span class="edge-other">${escHtml(otherLabel)}</span>` +
+        `<span class="edge-rel">${escHtml(rel)}</span>` +
+        (conf ? `<span class="edge-conf">${conf}</span>` : '') +
+        `</div>`;
+    });
+  }
+
   sidebarBody.innerHTML = html;
+
+  sidebarBody.querySelectorAll('.detail-edge').forEach(el => {
+    el.addEventListener('click', () => {
+      const targetNode = nodesMap.get(el.dataset.nodeId);
+      if (targetNode) showSidebar(targetNode);
+    });
+  });
 }
 
 // ── metadata rendering helpers ────────────────────────────────────────
@@ -2599,7 +2705,13 @@ function handleEvent(data) {
 
 function addNode(payload) {
   if (!payload || !payload.id) return;
-  if (nodesMap.has(payload.id)) return;
+  if (nodesMap.has(payload.id)) {
+    const existing = nodesMap.get(payload.id);
+    if (payload.metadata) {
+      existing.metadata = { ...existing.metadata, ...payload.metadata };
+    }
+    return;
+  }
   const node = { ...payload };
 
   // Seed position near a connected parent so the node doesn't start at origin
@@ -2624,6 +2736,7 @@ function addNode(payload) {
 
 function addEdge(payload) {
   if (!payload || !payload.source || !payload.target) return;
+  if (payload.source === payload.target) return;
   const key = `${payload.source}-${payload.target}`;
   if (links.some(l => `${l.source?.id||l.source}-${l.target?.id||l.target}` === key)) return;
 
