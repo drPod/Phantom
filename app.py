@@ -25,6 +25,7 @@ image = (
         "lxml~=5.3",
         "disposable-email-domains",
         "anthropic~=0.49",
+        "tenacity~=8.2",
     )
     .env({"PYTHONPATH": "/root/osint_recon"})
     .add_local_dir(_local_dir, remote_path="/root/osint_recon")
@@ -52,3 +53,4 @@ import resolvers.phone  # noqa: F401
 import resolvers.wallet  # noqa: F401
 import inference.extractor  # noqa: F401
 import agent.state  # noqa: F401
+import telemetry.exporter  # noqa: F401

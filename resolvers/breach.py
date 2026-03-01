@@ -11,6 +11,7 @@ import modal
 from leakcheck import LeakCheckAPI_Public, LeakCheckAPI_v2
 
 from app import app, image, osint_secret
+from resolvers._http import httpx_request
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
 from models import EntityType
 from scan_log import log_scan_event
@@ -265,7 +266,8 @@ def resolve_breach(
     bd_key = os.environ.get("BREACHDIRECTORY_KEY", "")
     if bd_key:
         try:
-            r = httpx.get(
+            r = httpx_request(
+                "GET",
                 "https://breachdirectory.p.rapidapi.com/",
                 params={"func": "auto", "term": value},
                 headers={

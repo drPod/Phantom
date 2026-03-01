@@ -11,6 +11,7 @@ import httpx
 import modal
 
 from app import app, image, osint_secret
+from resolvers._http import httpx_request
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
 from models import EntityType
 from scan_log import log_scan_event
@@ -84,7 +85,8 @@ def resolve_domain(
 
     # 1. crt.sh — certificate transparency (subdomains + org names)
     try:
-        r = httpx.get(
+        r = httpx_request(
+            "GET",
             "https://crt.sh/",
             params={"q": domain, "output": "json"},
             timeout=30,

@@ -454,7 +454,7 @@ def _distill_profiles(raw_profiles: list[dict], username: str) -> list[dict]:
         return _fallback_distill(raw_profiles)
 
 
-async def _run_all_checks(username: str, sites: list[dict], deadline: float) -> list[dict]:
+async def _run_all_checks(username: str, sites: list[dict], deadline: float, scan_id: str = "") -> list[dict]:
     """Run site checks concurrently with a wall-clock deadline.
 
     Uses asyncio.wait instead of asyncio.gather so we can collect whatever
@@ -493,11 +493,21 @@ async def _run_all_checks(username: str, sites: list[dict], deadline: float) -> 
             len(done), len(sites), len(pending), len(confirmed),
         )
 
+        write_stream_event(scan_id, "narration", {
+            "message": f"enumerate_username: checked {len(done)}/{len(sites)} sites — {len(confirmed)} profile(s) found",
+            "category": "resolver",
+        })
+
         remaining = max(0.0, deadline - time.monotonic())
         if remaining < 5.0 or not confirmed:
             return confirmed
 
         # --- Aggressive profile scraping phase ---
+        write_stream_event(scan_id, "narration", {
+            "message": f"enumerate_username: scraping metadata from {len(confirmed)} confirmed profile(s)...",
+            "category": "resolver",
+        })
+
         async def _bounded_scrape(hit: dict) -> dict:
             async with sem:
                 profile = await _extract_profile_info(client, hit["url"])
@@ -530,6 +540,10 @@ async def _run_all_checks(username: str, sites: list[dict], deadline: float) -> 
     # --- Distillation phase (synchronous Claude call, outside async context) ---
     remaining = max(0.0, deadline - time.monotonic())
     if remaining >= 3.0 and raw_scraped:
+        write_stream_event(scan_id, "narration", {
+            "message": f"enumerate_username: distilling {len(raw_scraped)} profile(s) with AI...",
+            "category": "resolver",
+        })
         distilled = _distill_profiles(raw_scraped, username)
     else:
         logger.info("_run_all_checks: no time for distillation, using fallback")
@@ -575,8 +589,13 @@ def enumerate_username(
         {"source": source_entity_key, "target": node_id, "relationship": "enum_username", "confidence": 1.0}
     ]
 
+    write_stream_event(scan_id, "narration", {
+        "message": f"enumerate_username: checking {len(sites)} sites for '{username}'...",
+        "category": "resolver",
+    })
+
     deadline = wall_start + _WALL_CLOCK_BUDGET
-    hits = asyncio.run(_run_all_checks(username, sites, deadline))
+    hits = asyncio.run(_run_all_checks(username, sites, deadline, scan_id=scan_id))
 
     metadata: dict[str, Any] = {
         "username": username,

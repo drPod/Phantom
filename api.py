@@ -1,8 +1,5 @@
-"""FastAPI endpoints: POST /scan, GET /scan/{id}/status, GET /scan/{id}/graph, GET /scan/{id}/stream, GET /scan/{id}/log, GET /debug/{id}."""
+"""FastAPI endpoints: POST /scan, GET /scan/{id}/status, GET /scan/{id}/graph, GET /scan/{id}/events, GET /scan/{id}/log, GET /debug/{id}."""
 
-import asyncio
-import json
-import time
 import uuid
 from typing import Any
 
@@ -24,7 +21,6 @@ _STREAM_PREFIX = "osint-stream-"
 def fastapi_app() -> Any:
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import StreamingResponse
 
     from orchestrator import run_scan
 
@@ -145,93 +141,69 @@ def fastapi_app() -> Any:
             media_type="text/plain; charset=utf-8",
         )
 
-    @web_app.get("/scan/{scan_id}/stream")
-    async def stream_scan(scan_id: str) -> StreamingResponse:
+    @web_app.get("/scan/{scan_id}/events")
+    def poll_events(scan_id: str, after: int = -1) -> dict:
         """
-        SSE endpoint — polls the per-scan stream Dict every 0.5 s and yields
-        new events as  data: <json>\n\n  until the scan finishes.
+        Polling endpoint — returns all events with seq > after as a JSON array.
+        Clients call this repeatedly (e.g. every second) instead of holding a
+        long-lived SSE connection, avoiding Modal's 150-second request timeout.
+
+        Response shape:
+          {
+            "events":   [...],   # list of event dicts with seq > after, sorted by seq
+            "terminal": bool,    # true when the scan has reached a final state
+            "status":   {...}    # terminal status payload (only set when terminal=true)
+          }
         """
-        async def event_generator():
-            seen_keys: set[str] = set()
+        if scan_id not in scan_results:
+            raise HTTPException(status_code=404, detail="Scan not found")
 
-            while True:
-                # ── collect new events ──────────────────────────────────────
-                new_events: list[dict[str, Any]] = []
-                try:
-                    sd = modal.Dict.from_name(
-                        f"{_STREAM_PREFIX}{scan_id}", create_if_missing=True
-                    )
-                    for k in sd.keys():
-                        if k.startswith("evt_") and k not in seen_keys:
-                            evt = sd.get(k)
-                            if evt is not None:
-                                seen_keys.add(k)
-                                new_events.append(evt)
-                except Exception:
-                    pass
+        # Collect all events with seq > after
+        new_events: list[dict[str, Any]] = []
+        try:
+            sd = modal.Dict.from_name(
+                f"{_STREAM_PREFIX}{scan_id}", create_if_missing=True
+            )
+            for k in sd.keys():
+                if k.startswith("evt_"):
+                    evt = sd.get(k)
+                    if evt is not None and evt.get("seq", 0) > after:
+                        new_events.append(evt)
+        except Exception:
+            pass
 
-                # yield events sorted by sequence number
-                new_events.sort(key=lambda e: e.get("seq", 0))
-                for evt in new_events:
-                    yield f"data: {json.dumps(evt)}\n\n"
+        new_events.sort(key=lambda e: e.get("seq", 0))
 
-                # ── check scan status ────────────────────────────────────────
-                try:
-                    row = scan_results.get(scan_id)
-                except Exception:
-                    row = None
+        # Check scan status
+        try:
+            row = scan_results.get(scan_id)
+        except Exception:
+            row = None
 
-                if row is None:
-                    yield (
-                        f"data: {json.dumps({'type': 'error', 'payload': {'message': 'Scan not found'}})}\n\n"
-                    )
-                    return
+        if row is None:
+            raise HTTPException(status_code=404, detail="Scan not found")
 
-                status = row.get("status", "running")
-                if status in (ScanStatus.COMPLETED.value, ScanStatus.FAILED.value, ScanStatus.CANCELLED.value):
-                    # Drain any remaining events one last time
-                    final_events: list[dict[str, Any]] = []
-                    try:
-                        sd = modal.Dict.from_name(
-                            f"{_STREAM_PREFIX}{scan_id}", create_if_missing=True
-                        )
-                        for k in sd.keys():
-                            if k.startswith("evt_") and k not in seen_keys:
-                                evt = sd.get(k)
-                                if evt is not None:
-                                    seen_keys.add(k)
-                                    final_events.append(evt)
-                    except Exception:
-                        pass
-                    final_events.sort(key=lambda e: e.get("seq", 0))
-                    for evt in final_events:
-                        yield f"data: {json.dumps(evt)}\n\n"
-
-                    # Terminal status event
-                    terminal = {
-                        "seq": -1,
-                        "type": "status",
-                        "payload": {
-                            "status": status,
-                            "entities_seen": row.get("entities_seen", 0),
-                            "depth_reached": row.get("depth_reached", 0),
-                            "error": row.get("error"),
-                        },
-                        "ts": time.time(),
-                    }
-                    yield f"data: {json.dumps(terminal)}\n\n"
-                    return
-
-                await asyncio.sleep(0.5)
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+        scan_status = row.get("status", "running")
+        terminal = scan_status in (
+            ScanStatus.COMPLETED.value,
+            ScanStatus.FAILED.value,
+            ScanStatus.CANCELLED.value,
         )
+
+        status_payload: dict[str, Any] | None = None
+        if terminal:
+            status_payload = {
+                "status": scan_status,
+                "entities_seen": row.get("entities_seen", 0),
+                "depth_reached": row.get("depth_reached", 0),
+                "error": row.get("error"),
+            }
+
+        return {
+            "events": new_events,
+            "terminal": terminal,
+            "status": status_payload,
+        }
 
 
     @web_app.get("/debug/{scan_id}")
@@ -314,6 +286,27 @@ def fastapi_app() -> Any:
             "estimated_remaining": estimated_remaining,
             "timeline": timeline,
         }
+
+    @web_app.get("/scan/{scan_id}/telemetry")
+    def get_scan_telemetry(scan_id: str):
+        """Return the telemetry bundle as downloadable JSON."""
+        import json as _json
+        from fastapi.responses import Response
+
+        from telemetry.exporter import TELEMETRY_DICT_NAME
+
+        telemetry_dict = modal.Dict.from_name(TELEMETRY_DICT_NAME, create_if_missing=True)
+        try:
+            bundle = telemetry_dict[scan_id]
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry not found for this scan")
+        content = _json.dumps(bundle, indent=2, default=str)
+        filename = f"telemetry-{scan_id[:8]}.json"
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @web_app.get("/scan/{scan_id}/log")
     def get_scan_log(

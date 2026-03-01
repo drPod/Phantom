@@ -35,6 +35,7 @@ from models import Entity, EntityType, ScanConfig, ScanStatus
 from resolvers.identity_correlator import correlate_identities
 from scan_log import log_scan_event
 from stream import write_stream_event
+from telemetry.exporter import TelemetryCollector
 
 # ---------------------------------------------------------------------------
 # Validation helpers (shared with GPU post-processing)
@@ -112,6 +113,30 @@ def _emit_resolver_progress(
     })
 
 
+def _emit_resolver_status(scan_id: str, in_flight: "InFlightPool") -> None:
+    """Emit a resolver_status SSE event for each currently in-flight resolver."""
+    now = time.monotonic()
+    for meta in in_flight.pending_meta_snapshot():
+        write_stream_event(scan_id, "resolver_status", {
+            "resolver_name": meta.resolver_name,
+            "entity_key": meta.entity_key,
+            "status": "running",
+            "elapsed_s": round(now - meta.t0, 1),
+        })
+
+
+def _emit_resolver_done(scan_id: str, meta: "_RefMeta") -> None:
+    """Emit a resolver_status SSE event when a resolver finishes (done or failed)."""
+    write_stream_event(scan_id, "resolver_status", {
+        "resolver_name": meta.resolver_name,
+        "entity_key": meta.entity_key,
+        "status": "failed" if meta.error else "done",
+        "elapsed_s": round(meta.duration, 1),
+        "duration_ms": round(meta.duration * 1000),
+        "error": meta.error,
+    })
+
+
 def _safe_dict_put(d: Any, key: str, value: Any, scan_id: str) -> None:
     try:
         d[key] = value
@@ -166,6 +191,9 @@ def _get_resolver_fn(tool_name: str) -> Any:
 # ---------------------------------------------------------------------------
 # Wave-pipelining: in-flight resolver pool
 # ---------------------------------------------------------------------------
+
+_RESOLVER_TIMEOUT = 120
+
 
 @dataclass
 class _RefMeta:
@@ -487,7 +515,6 @@ def _breach_correlate(snapshot: dict[str, Any], scan_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _MAX_AGENT_TURNS = 30
-_RESOLVER_TIMEOUT = 120
 
 _analyst_logger = logging.getLogger(__name__)
 
@@ -524,6 +551,9 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
     log_scan_event(scan_id, "scan_started", seed_entity=seed_entity, config=config_dict)
 
     d = None
+    total_dispatched = 0
+    total_completed = 0
+    total_failed = 0
 
     try:
         config = ScanConfig.model_validate(config_dict)
@@ -548,6 +578,8 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
         _safe_dict_put(d, f"{NODE_PREFIX}{seed_key}", seed_node, scan_id)
         write_stream_event(scan_id, "node", seed_node)
         _narrate(scan_id, f"Starting investigation of {seed.type.value}: {seed.value}", "start")
+
+        tc = TelemetryCollector(scan_id, seed_entity, config_dict)
 
         known_entities: set[str] = {seed_key}
         entities_seen = 1  # seed counts
@@ -636,6 +668,10 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     break
                 if "stop" in d:
                     cancelled = True
+                    try:
+                        tc.record_user_stop()
+                    except Exception:
+                        pass
                     break
 
                 # ========== TURN START: Harvest background resolvers ==========
@@ -644,12 +680,23 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     if bg_completed or bg_failed:
                         total_completed += len(bg_completed)
                         total_failed += len(bg_failed)
+                        for _m in bg_completed + bg_failed:
+                            _emit_resolver_done(scan_id, _m)
+                            try:
+                                tc.record_resolver(
+                                    _m.resolver_name, _m.entity_key,
+                                    _m.succeeded, _m.error,
+                                    round(_m.duration * 1000, 1),
+                                )
+                            except Exception:
+                                pass
                         snapshot = _snapshot_dict(d, scan_id)
                         diff = graph_state.sync_from_dict(snapshot)
                         _log_harvest(bg_completed, bg_failed, scan_id,
                                      nodes_found=len(diff.new_nodes),
                                      edges_found=len(diff.new_edges))
                         _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
+                        _emit_resolver_status(scan_id, in_flight)
                         if diff.new_nodes or diff.new_edges:
                             prev_brief = _harvest_analyst_future(analyst_future, analyst_fallback_args)
 
@@ -674,6 +721,14 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                                 "new_edges": len(diff.new_edges),
                                 "background": True,
                             })
+                            try:
+                                tc.record_analyst_brief(
+                                    _turn, bg_brief,
+                                    len(diff.new_nodes), len(diff.new_edges),
+                                    background=True,
+                                )
+                            except Exception:
+                                pass
                             _narrate(
                                 scan_id,
                                 f"Background resolvers returned {len(diff.new_nodes)} new node(s) — analyst updated brief",
@@ -698,6 +753,21 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 response = call_planner(client, planner_system, messages, ALL_TOOLS)
                 log_scan_event(scan_id, "planner_turn", turn=_turn)
 
+                try:
+                    _tc_reasoning = " ".join(
+                        b.text for b in response.content
+                        if hasattr(b, "text") and b.text
+                    ) or None
+                    _tc_tool_calls = [
+                        {"tool": b.name, "input": b.input}
+                        for b in response.content if b.type == "tool_use"
+                    ]
+                    tc.record_planner_turn(
+                        _turn, _tc_reasoning, _tc_tool_calls, response.stop_reason,
+                    )
+                except Exception:
+                    pass
+
                 if response.stop_reason != "tool_use":
                     text_parts = [
                         b.text for b in response.content
@@ -712,6 +782,13 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                         turn=_turn, stop_reason=response.stop_reason,
                     )
                     break
+
+                reasoning_parts = [b.text for b in response.content if hasattr(b, "text") and b.text]
+                if reasoning_parts:
+                    write_stream_event(scan_id, "planner_reasoning", {
+                        "text": " ".join(reasoning_parts),
+                        "turn": _turn,
+                    })
 
                 tool_blocks = [b for b in response.content if b.type == "tool_use"]
                 for block in tool_blocks:
@@ -803,6 +880,7 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     total_dispatched += 1
 
                 _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
+                _emit_resolver_status(scan_id, in_flight)
 
                 # ========== STEP 3: Immediate harvest (catch fast resolvers) ==========
                 if in_flight.has_pending():
@@ -812,12 +890,23 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     if completed or failed:
                         total_completed += len(completed)
                         total_failed += len(failed)
+                        for _m in completed + failed:
+                            _emit_resolver_done(scan_id, _m)
+                            try:
+                                tc.record_resolver(
+                                    _m.resolver_name, _m.entity_key,
+                                    _m.succeeded, _m.error,
+                                    round(_m.duration * 1000, 1),
+                                )
+                            except Exception:
+                                pass
                         snapshot = _snapshot_dict(d, scan_id)
                         diff = graph_state.sync_from_dict(snapshot)
                         _log_harvest(completed, failed, scan_id,
                                      nodes_found=len(diff.new_nodes),
                                      edges_found=len(diff.new_edges))
                         _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
+                        _emit_resolver_status(scan_id, in_flight)
                 else:
                     completed, failed = [], []
 
@@ -866,6 +955,14 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                         "new_nodes": len(diff.new_nodes),
                         "new_edges": len(diff.new_edges),
                     })
+                    try:
+                        tc.record_analyst_brief(
+                            _turn, brief,
+                            len(diff.new_nodes), len(diff.new_edges),
+                            background=False,
+                        )
+                    except Exception:
+                        pass
                     _narrate(
                         scan_id,
                         f"Analyst reviewed {len(diff.new_nodes)} new node(s), {len(diff.new_edges)} edge(s) — identifying leads",
@@ -937,12 +1034,23 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 if drain_completed or drain_failed:
                     total_completed += len(drain_completed)
                     total_failed += len(drain_failed)
+                    for _m in drain_completed + drain_failed:
+                        _emit_resolver_done(scan_id, _m)
+                        try:
+                            tc.record_resolver(
+                                _m.resolver_name, _m.entity_key,
+                                _m.succeeded, _m.error,
+                                round(_m.duration * 1000, 1),
+                            )
+                        except Exception:
+                            pass
                     drain_snapshot = _snapshot_dict(d, scan_id)
                     drain_diff = graph_state.sync_from_dict(drain_snapshot)
                     _log_harvest(drain_completed, drain_failed, scan_id,
                                  nodes_found=len(drain_diff.new_nodes),
                                  edges_found=len(drain_diff.new_edges))
                     _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
+                    _emit_resolver_status(scan_id, in_flight)
 
             # -- drain last analyst future so it doesn't leak --
             if analyst_future is not None and not analyst_future.done():
@@ -1019,14 +1127,32 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             "entities_seen": final_entities_seen,
             "depth_reached": final_depth,
         })
+        try:
+            _graph_summary = {
+                "node_count": len(graph_payload.get("nodes", [])) if graph_payload else 0,
+                "edge_count": len(graph_payload.get("edges", [])) if graph_payload else 0,
+            }
+            tc.finalize(status.value, _graph_summary, report)
+        except Exception:
+            pass
         write_stream_event(scan_id, "status", {
             "status": status.value,
             "entities_seen": final_entities_seen,
             "depth_reached": final_depth,
+            "node_count": node_count,
+            "edge_count": len(graph_payload.get("edges", [])) if graph_payload else 0,
+            "resolvers_completed": total_completed,
+            "resolvers_failed": total_failed,
+            "resolvers_total": total_dispatched,
         })
 
     except Exception as e:
         err = f"{e}\n{traceback.format_exc()}"
+        try:
+            tc.record_error(err)
+            tc.finalize(ScanStatus.FAILED.value, None, None)
+        except Exception:
+            pass
         partial_graph = None
         try:
             if d is not None:
@@ -1053,4 +1179,14 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 error=str(put_err), data_preview=str(err)[:500],
             )
             raise
-        write_stream_event(scan_id, "status", {"status": ScanStatus.FAILED.value, "error": err})
+        _partial_node_count = len(partial_graph.get("nodes", [])) if partial_graph else 0
+        _partial_edge_count = len(partial_graph.get("edges", [])) if partial_graph else 0
+        write_stream_event(scan_id, "status", {
+            "status": ScanStatus.FAILED.value,
+            "error": err,
+            "node_count": _partial_node_count,
+            "edge_count": _partial_edge_count,
+            "resolvers_completed": total_completed,
+            "resolvers_failed": total_failed,
+            "resolvers_total": total_dispatched,
+        })
