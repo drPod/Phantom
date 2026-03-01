@@ -241,7 +241,60 @@ def correlate_identities(snapshot: dict[str, Any], scan_id: str) -> dict[str, An
 
     except Exception as ex:
         log_scan_event(scan_id, "identity_correlation_error", error=str(ex))
+        # Fallback: lightweight token-overlap heuristic when GPU is unavailable
+        try:
+            snapshot = _fallback_correlate(candidates, snapshot, scan_id)
+        except Exception as fb_ex:
+            log_scan_event(scan_id, "identity_correlation_fallback_error", error=str(fb_ex))
 
+    return snapshot
+
+
+def _fallback_correlate(
+    candidates: list,
+    snapshot: dict[str, Any],
+    scan_id: str,
+) -> dict[str, Any]:
+    """String-similarity fallback when GPU inference is unavailable.
+
+    Uses Jaccard token overlap as a proxy for identity match confidence.
+    Emits likely_same_person edges with confidence capped at 0.74 (below
+    the GPU threshold) so downstream consumers can distinguish fallback results.
+    """
+    new_edges: list[dict[str, Any]] = []
+    for node_a, node_b, profile_a, profile_b in candidates[:_MAX_GPU_CALLS]:
+        tokens_a = _profile_tokens(profile_a)
+        tokens_b = _profile_tokens(profile_b)
+        if not tokens_a or not tokens_b:
+            continue
+        intersection = tokens_a & tokens_b
+        union = tokens_a | tokens_b
+        jaccard = len(intersection) / len(union) if union else 0.0
+        # Require >=3 shared tokens and >=40% overlap for a fallback match
+        if len(intersection) >= 3 and jaccard >= 0.40:
+            score = round(min(jaccard * 0.9, 0.74), 3)  # cap below GPU threshold
+            edge: dict[str, Any] = {
+                "source": node_a.get("id", ""),
+                "target": node_b.get("id", ""),
+                "relationship": "likely_same_person",
+                "confidence": score,
+                "fallback": True,
+            }
+            new_edges.append(edge)
+            log_scan_event(
+                scan_id, "identity_correlation_fallback_match",
+                node_a=node_a.get("id"), node_b=node_b.get("id"),
+                jaccard=jaccard, shared_tokens=list(intersection)[:5],
+            )
+    if new_edges:
+        batch_key = f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"
+        snapshot[batch_key] = new_edges
+        for edge in new_edges:
+            write_stream_event(scan_id, "edge", edge)
+    log_scan_event(
+        scan_id, "identity_correlation_fallback_completed",
+        matches_found=len(new_edges), candidates_checked=len(candidates),
+    )
     return snapshot
 
 
@@ -267,11 +320,35 @@ def correlate_identities_tool(
     if not scan_id:
         return
 
+    try:
+        _correlate_identities_tool_impl(scan_id)
+    except Exception as exc:
+        logger.error("correlate_identities_tool top-level failure (scan=%s): %s", scan_id, exc)
+        try:
+            log_scan_event(scan_id, "identity_correlator_failed", error=str(exc))
+        except Exception:
+            pass
+
+
+def _correlate_identities_tool_impl(scan_id: str) -> None:
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
+
+    # Guard: ensure we have enough nodes before attempting correlation
+    try:
+        all_keys = list(d.keys())
+    except Exception as exc:
+        log_scan_event(scan_id, "identity_correlator_dict_read_failed", error=str(exc))
+        return
+
+    node_keys = [k for k in all_keys if k.startswith(NODE_PREFIX)]
+    if len(node_keys) < 2:
+        log_scan_event(scan_id, "identity_correlation_skipped",
+                       reason="insufficient_nodes", node_count=len(node_keys))
+        return
 
     # Snapshot the Dict into a plain dict
     snapshot: dict[str, Any] = {}
-    for k in list(d.keys()):
+    for k in all_keys:
         try:
             snapshot[k] = d[k]
         except Exception:
@@ -280,7 +357,7 @@ def correlate_identities_tool(
     snapshot = correlate_identities(snapshot, scan_id)
 
     # Write any new edge batches back to the Dict so the orchestrator sees them
-    existing_keys = set(d.keys())
+    existing_keys = set(all_keys)
     for k, v in snapshot.items():
         if k.startswith(EDGES_BATCH_PREFIX) and k not in existing_keys:
             try:

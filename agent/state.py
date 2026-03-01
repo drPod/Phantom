@@ -108,6 +108,20 @@ class GraphState:
         with self._lock:
             return f"{resolver}:{entity_key}" in self._resolved_pairs
 
+    def resolved_entity_keys(self) -> set[str]:
+        """Return the set of entity_keys that have been attempted by any resolver."""
+        with self._lock:
+            result: set[str] = set()
+            for pair in self._resolved_pairs:
+                # pairs are stored as "resolver_name:entity_key"
+                # entity_key itself may contain ":" (e.g. "username:torvalds")
+                # so split on first ":" only gives resolver, not entity_key
+                # use the known resolver names as a split guide:
+                idx = pair.find(":")
+                if idx != -1:
+                    result.add(pair[idx + 1:])
+            return result
+
     # ------------------------------------------------------------------
     # Public summary methods
     # ------------------------------------------------------------------
