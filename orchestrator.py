@@ -35,7 +35,7 @@ from models import Entity, EntityType, ScanConfig, ScanStatus
 from resolvers.identity_correlator import correlate_identities
 from scan_log import log_scan_event
 from stream import write_stream_event
-from telemetry.exporter import TelemetryCollector
+from telemetry.exporter import TELEMETRY_DICT_NAME, TelemetryCollector
 
 # ---------------------------------------------------------------------------
 # Validation helpers (shared with GPU post-processing)
@@ -453,6 +453,25 @@ def _breach_correlate(snapshot: dict[str, Any], scan_id: str) -> dict[str, Any]:
     or phone number across their breach entries.  Runs as a post-processing step
     so it never touches the Planner/Analyst context.
     """
+    # Precondition: require at least one successfully resolved email node.
+    # If resolve_email failed for all calls, breach data is likely seeded from
+    # empty metadata and the correlation pass will produce zero useful edges.
+    resolved_email_nodes = [
+        v for k, v in snapshot.items()
+        if k.startswith(NODE_PREFIX) and isinstance(v, dict)
+        and v.get("type") == "email"
+        and v.get("metadata", {}).get("email")  # has real metadata, not just seed
+        and not v.get("metadata", {}).get("seed")  # exclude bare seed-injected nodes
+    ]
+    if not resolved_email_nodes:
+        log_scan_event(
+            scan_id, "breach_correlate_skipped",
+            reason="no_resolved_email_nodes",
+            note="resolve_email likely failed; breach pivot will be low-yield. "
+                 "Recommend manual email verification.",
+        )
+        return snapshot
+
     indexes: dict[str, dict[str, set[str]]] = {
         "password_hash": {},
         "ip_address": {},
@@ -651,6 +670,9 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
         total_dispatched = 0
         total_completed = 0
         total_failed = 0
+        # Track (resolver_name, entity_key) pairs that have already failed so we
+        # can prevent re-spawning and inject explicit failure context into the planner.
+        failed_resolver_pairs: set[tuple[str, str]] = set()
         analyst_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="analyst")
         analyst_future: Future | None = None
         analyst_fallback_args: tuple | None = None
@@ -682,6 +704,8 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                         total_failed += len(bg_failed)
                         for _m in bg_completed + bg_failed:
                             _emit_resolver_done(scan_id, _m)
+                            if not _m.succeeded:
+                                failed_resolver_pairs.add((_m.resolver_name, _m.entity_key))
                             try:
                                 tc.record_resolver(
                                     _m.resolver_name, _m.entity_key,
@@ -852,6 +876,14 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                         skipped_results[block.id] = f"Already ran {block.name} on {ek}."
                         log_scan_event(scan_id, "entity_skipped", reason="dedup", entity_key=ek, resolver=block.name)
                         continue
+                    if (block.name, ek) in failed_resolver_pairs:
+                        skipped_results[block.id] = (
+                            f"{block.name} already failed for {ek} in a previous turn. "
+                            "Do not retry. Pivot to alternative data sources."
+                        )
+                        log_scan_event(scan_id, "entity_skipped", reason="previously_failed",
+                                       entity_key=ek, resolver=block.name)
+                        continue
                     if depth > config.max_depth:
                         skipped_results[block.id] = f"Depth {depth} exceeds max_depth {config.max_depth}."
                         log_scan_event(scan_id, "entity_skipped", reason="depth_limit", entity_key=ek)
@@ -892,6 +924,8 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                         total_failed += len(failed)
                         for _m in completed + failed:
                             _emit_resolver_done(scan_id, _m)
+                            if not _m.succeeded:
+                                failed_resolver_pairs.add((_m.resolver_name, _m.entity_key))
                             try:
                                 tc.record_resolver(
                                     _m.resolver_name, _m.entity_key,
@@ -991,9 +1025,45 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                 )
                 with state_lock:
                     _es = entities_seen
+                # Build resolver failure context so the planner knows what not to retry
+                if failed_resolver_pairs:
+                    failure_lines = [
+                        f"  - {rname} on {ek}" for rname, ek in sorted(failed_resolver_pairs)
+                    ]
+                    failure_section = (
+                        "\n\nRESOLVER FAILURES (do not retry these — pivot to alternative sources):\n"
+                        + "\n".join(failure_lines)
+                    )
+                else:
+                    failure_section = ""
+
+                # Build COVERAGE GAP ANALYSIS so the planner always has concrete next-step candidates
+                with state_lock:
+                    _known = set(known_entities)
+                attempted_keys = graph_state.resolved_entity_keys()
+                not_yet_attempted = sorted(_known - attempted_keys)
+                if not_yet_attempted:
+                    # Summarise by entity type
+                    type_counts: dict[str, int] = {}
+                    for ek in not_yet_attempted:
+                        etype = ek.split(":", 1)[0] if ":" in ek else "unknown"
+                        type_counts[etype] = type_counts.get(etype, 0) + 1
+                    top_uncovered = sorted(type_counts.items(), key=lambda x: -x[1])[:3]
+                    coverage_section = (
+                        "\n\nCOVERAGE GAP ANALYSIS:\n"
+                        f"  Entities not yet investigated ({len(not_yet_attempted)} total): "
+                        + ", ".join(f"{t}×{n}" for t, n in top_uncovered)
+                        + "\n  Suggested next priorities: "
+                        + ", ".join(t for t, _ in top_uncovered)
+                    )
+                else:
+                    coverage_section = ""
+
                 brief_with_stats = (
                     f"Analyst brief:\n{brief}\n\n"
                     f"entities_seen={_es}/{config.max_entities}"
+                    f"{failure_section}"
+                    f"{coverage_section}"
                     f"{pending_suffix}"
                 )
 
@@ -1135,6 +1205,15 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             tc.finalize(status.value, _graph_summary, report)
         except Exception:
             pass
+        try:
+            from telemetry.evaluator import EVAL_DICT_NAME, evaluate_bundle
+            tel_dict = modal.Dict.from_name(TELEMETRY_DICT_NAME, create_if_missing=True)
+            bundle = tel_dict[scan_id]
+            scorecard = evaluate_bundle(bundle)
+            eval_dict = modal.Dict.from_name(EVAL_DICT_NAME, create_if_missing=True)
+            eval_dict[scan_id] = scorecard
+        except Exception:
+            pass
         write_stream_event(scan_id, "status", {
             "status": status.value,
             "entities_seen": final_entities_seen,
@@ -1151,6 +1230,15 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
         try:
             tc.record_error(err)
             tc.finalize(ScanStatus.FAILED.value, None, None)
+        except Exception:
+            pass
+        try:
+            from telemetry.evaluator import EVAL_DICT_NAME, evaluate_bundle
+            tel_dict = modal.Dict.from_name(TELEMETRY_DICT_NAME, create_if_missing=True)
+            bundle = tel_dict[scan_id]
+            scorecard = evaluate_bundle(bundle)
+            eval_dict = modal.Dict.from_name(EVAL_DICT_NAME, create_if_missing=True)
+            eval_dict[scan_id] = scorecard
         except Exception:
             pass
         partial_graph = None
