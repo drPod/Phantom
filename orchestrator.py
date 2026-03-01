@@ -192,7 +192,7 @@ def _get_resolver_fn(tool_name: str) -> Any:
 # Wave-pipelining: in-flight resolver pool
 # ---------------------------------------------------------------------------
 
-_RESOLVER_TIMEOUT = 120
+_RESOLVER_TIMEOUT = 60  # reduced from 120 for faster failure detection
 
 
 @dataclass
@@ -534,6 +534,7 @@ def _breach_correlate(snapshot: dict[str, Any], scan_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _MAX_AGENT_TURNS = 30
+_MAX_AGENT_TURNS_DEMO = 8  # demo mode: cap turns for fast completion
 
 _analyst_logger = logging.getLogger(__name__)
 
@@ -679,7 +680,36 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
 
         try:  # ensure in_flight.cancel_all() on every exit path
 
-            for _turn in range(_MAX_AGENT_TURNS):
+            # ===== TURN-0 BLAST: dispatch all seed resolvers before planner =====
+            # For username seeds, immediately fire all reliable resolvers in parallel
+            # so results are in-flight while the planner LLM call is pending.
+            # This eliminates one full round-trip of planner latency on the seed.
+            if seed.type.value == "username":
+                _blast_resolvers = [
+                    ("resolve_github", seed.value, "username", 0),
+                    ("enumerate_username", seed.value, "username", 0),
+                    ("resolve_social", seed.value, "username", 0),
+                ]
+                for _bname, _bval, _btype, _bdepth in _blast_resolvers:
+                    _bek = _entity_key(_btype, _bval)
+                    if not graph_state.is_resolved(_bname, _bek):
+                        _bfn = _get_resolver_fn(_bname)
+                        _bref = _bfn.spawn(_bval, _btype, _bdepth, seed_key, scan_id)
+                        graph_state.mark_resolved(_bname, _bek)
+                        with state_lock:
+                            if _bek not in known_entities:
+                                known_entities.add(_bek)
+                                entities_seen += 1
+                        in_flight.submit(_bref, _bname, _bek, scan_id)
+                        total_dispatched += 1
+                        log_scan_event(scan_id, "resolver_spawned",
+                                       resolver=_bname, entity_key=_bek, depth=_bdepth,
+                                       note="turn0_blast")
+                _narrate(scan_id, f"Blast-dispatched {len(_blast_resolvers)} seed resolvers in parallel", "resolver")
+            # =====================================================================
+
+            _turn_limit = _MAX_AGENT_TURNS_DEMO if config.demo_mode else _MAX_AGENT_TURNS
+            for _turn in range(_turn_limit):
                 # -- guard rails --
                 if time.monotonic() - start >= timeout_seconds:
                     log_scan_event(scan_id, "scan_timeout", timeout_seconds=timeout_seconds)
@@ -1151,12 +1181,17 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             "depth_reached": final_depth,
         })
 
-        _narrate(scan_id, "Running AI entity extraction on collected metadata...", "enrichment")
-        snapshot = _gpu_postprocess(snapshot, scan_id)
-        _narrate(scan_id, "Correlating breach identities across nodes...", "enrichment")
-        snapshot = _breach_correlate(snapshot, scan_id)
-        _narrate(scan_id, "Running cross-platform identity correlation...", "enrichment")
-        snapshot = correlate_identities(snapshot, scan_id)
+        if not config.demo_mode:
+            _narrate(scan_id, "Running AI entity extraction on collected metadata...", "enrichment")
+            snapshot = _gpu_postprocess(snapshot, scan_id)
+            _narrate(scan_id, "Correlating breach identities across nodes...", "enrichment")
+            snapshot = _breach_correlate(snapshot, scan_id)
+            _narrate(scan_id, "Running cross-platform identity correlation...", "enrichment")
+            snapshot = correlate_identities(snapshot, scan_id)
+        else:
+            # demo_mode: skip expensive GPU post-processing to keep wall-clock < 3 min
+            _narrate(scan_id, "Demo mode — skipping GPU enrichment for speed", "enrichment")
+            log_scan_event(scan_id, "gpu_postprocess_skipped", reason="demo_mode")
         graph_payload = build_from_dict(snapshot)
 
         # -- generate final intelligence report over the completed graph --

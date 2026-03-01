@@ -54,3 +54,7 @@ import resolvers.wallet  # noqa: F401
 import inference.extractor  # noqa: F401
 import agent.state  # noqa: F401
 import telemetry.exporter  # noqa: F401
+import telemetry.evaluator  # noqa: F401
+import telemetry.proposer  # noqa: F401
+import telemetry.manifest  # noqa: F401
+import telemetry.changelog  # noqa: F401

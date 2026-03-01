@@ -308,6 +308,164 @@ def fastapi_app() -> Any:
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @web_app.get("/scan/{scan_id}/evaluation")
+    def get_scan_evaluation(scan_id: str):
+        """Return (or generate) the evaluation scorecard for a completed scan."""
+        from telemetry.evaluator import EVAL_DICT_NAME, evaluate_bundle
+        from telemetry.exporter import TELEMETRY_DICT_NAME
+
+        eval_dict = modal.Dict.from_name(EVAL_DICT_NAME, create_if_missing=True)
+
+        try:
+            cached = eval_dict[scan_id]
+            return cached
+        except KeyError:
+            pass
+
+        telemetry_dict = modal.Dict.from_name(TELEMETRY_DICT_NAME, create_if_missing=True)
+        try:
+            bundle = telemetry_dict[scan_id]
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry not found for this scan")
+
+        status = bundle.get("final_status")
+        if status is None:
+            raise HTTPException(status_code=409, detail="Scan still running; evaluation requires a completed scan")
+
+        try:
+            scorecard = evaluate_bundle(bundle)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Evaluation failed: {exc}")
+
+        try:
+            eval_dict[scan_id] = scorecard
+        except Exception:
+            pass
+
+        return scorecard
+
+    @web_app.get("/telemetry/proposals")
+    def get_proposals(last_n: int = 10):
+        """Return (or generate) improvement proposals derived from the last N
+        evaluation scorecards.  Requires at least 3 evaluated scans."""
+        from telemetry.proposer import generate_proposals
+
+        try:
+            result = generate_proposals(last_n=last_n)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Proposal generation failed: {exc}"
+            )
+        return result
+
+    @web_app.get("/telemetry/manifest")
+    def get_manifest():
+        """Return the agent manifest — a self-describing document containing
+        the project structure, current prompt texts, tool schemas, and the
+        latest improvement proposals.
+
+        External AI agents (OpenClaw, Cursor agents) should fetch this
+        endpoint first to understand the stable contract before consuming
+        proposals or submitting webhook callbacks.
+        """
+        from telemetry.manifest import generate_manifest
+
+        try:
+            return generate_manifest()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Manifest generation failed: {exc}"
+            )
+
+    @web_app.post("/telemetry/webhook")
+    def post_webhook(payload: dict):
+        """Accept a completed-change report from an external agent.
+
+        Request body (all fields required unless marked optional):
+          {
+            "agent_id":              str    — identifier of the submitting agent,
+            "proposal_target_file":  str    — file the agent targeted,
+            "proposal_section":      str    — section / constant name changed,
+            "patch_description":     str    — human-readable description of the patch,
+            "result":                str    — "success" | "failure" | "partial",
+            "details":               str?   — optional extra context / error message,
+            "applied_at":            float? — unix timestamp when change was applied
+          }
+
+        The submission is logged to the ``osint-agent-webhooks`` Modal Dict
+        (keyed by a fresh UUID) and will be visible to the next evaluation
+        cycle.
+
+        Returns:
+          { "ok": true, "logged_id": "<uuid>" }
+        """
+        import time as _time
+        import uuid as _uuid
+
+        from telemetry.manifest import WEBHOOK_DICT_NAME, WebhookPayload, WebhookResponse
+
+        try:
+            validated = WebhookPayload.model_validate(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid payload: {exc}")
+
+        logged_id = str(_uuid.uuid4())
+        entry = {
+            **validated.model_dump(),
+            "received_at": _time.time(),
+            "logged_id": logged_id,
+        }
+
+        try:
+            webhook_dict = modal.Dict.from_name(WEBHOOK_DICT_NAME, create_if_missing=True)
+            webhook_dict[logged_id] = entry
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Failed to log webhook submission: {exc}"
+            )
+
+        return WebhookResponse(ok=True, logged_id=logged_id)
+
+    @web_app.get("/telemetry/changelog")
+    def get_changelog_endpoint(limit: int = 50, target_file: str | None = None):
+        """Return changelog entries recording applied prompt/config changes.
+
+        Query params:
+          limit       — max entries to return (default 50, newest first)
+          target_file — filter to a specific file (e.g. agent/planner.py)
+        """
+        from telemetry.changelog import get_changelog
+
+        return get_changelog(limit=limit, target_file=target_file)
+
+    @web_app.post("/telemetry/changelog/rollback/{entry_id}")
+    def rollback_changelog_entry(entry_id: str):
+        """Roll back a previously applied change.
+
+        Marks the changelog entry as rolled back and returns the
+        ``content_before`` text so the calling agent can re-apply it and
+        redeploy.
+
+        Response shape:
+          {
+            "entry":             {...},   # updated changelog entry
+            "restored_content":  "...",  # the content to restore
+            "target_file":       "...",
+            "section":           "..."
+          }
+        """
+        from telemetry.changelog import rollback_change
+
+        try:
+            result = rollback_change(entry_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}")
+        return result
+
     @web_app.get("/scan/{scan_id}/log")
     def get_scan_log(
         scan_id: str,

@@ -57,6 +57,18 @@ class ScanConfig(BaseModel):
     max_entities: int = Field(default=500, ge=1, le=10_000)
     max_depth: int = Field(default=3, ge=0, le=10)
     timeout_minutes: int = Field(default=20, ge=1, le=120)
+    demo_mode: bool = Field(default=False, description=(
+        "When True, caps the scan at max_depth=1, max_entities=50, timeout=3 min, "
+        "and skips GPU post-processing to keep total wall-clock time under 3 minutes "
+        "for live demonstrations."
+    ))
+
+    def model_post_init(self, __context: object) -> None:
+        """If demo_mode is set, enforce fast limits."""
+        if self.demo_mode:
+            self.max_depth = min(self.max_depth, 1)
+            self.max_entities = min(self.max_entities, 50)
+            self.timeout_minutes = min(self.timeout_minutes, 3)
 
 
 class ScanStatus(str, Enum):
@@ -87,6 +99,18 @@ class SeedRequest(BaseModel):
 class ScanRequest(BaseModel):
     seed: SeedRequest
     config: ScanConfig | None = None
+    demo_mode: bool = Field(default=False, description=(
+        "Shorthand to enable demo_mode without constructing a full config object. "
+        "Caps scan at max_depth=1, max_entities=50, timeout=3 min, skips GPU post-processing."
+    ))
+
+    def model_post_init(self, __context: object) -> None:
+        """Propagate demo_mode shorthand into config."""
+        if self.demo_mode:
+            if self.config is None:
+                self.config = ScanConfig(demo_mode=True)
+            else:
+                self.config.demo_mode = True
 
 
 class ScanResponse(BaseModel):
