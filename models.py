@@ -26,7 +26,7 @@ class Entity(BaseModel):
 
     def entity_key(self) -> str:
         """Canonical key for deduplication (normalized type:value)."""
-        v = self.value.strip().lower()
+        v = (str(self.value) if not isinstance(self.value, str) else self.value).strip().lower()
         if self.type == EntityType.EMAIL:
             v = v.lower()
         return f"{self.type.value}:{v}"
@@ -71,6 +71,7 @@ class ScanResult(BaseModel):
 
     status: ScanStatus
     graph: dict[str, Any] | None = Field(default=None, description="nodes + edges when completed")
+    report: str | None = Field(default=None, description="Final intelligence report markdown")
     error: str | None = Field(default=None, description="Error message when status is failed")
     entities_seen: int = 0
     depth_reached: int = 0
@@ -97,6 +98,7 @@ class StatusResponse(BaseModel):
     entities_seen: int = 0
     depth_reached: int = 0
     error: str | None = None
+    report: str | None = None
 
 
 class GraphResponse(BaseModel):

@@ -23,6 +23,8 @@ image = (
         "leakcheck~=2.0.0",
         "dnspython~=2.7",
         "lxml~=5.3",
+        "disposable-email-domains",
+        "anthropic~=0.49",
     )
     .env({"PYTHONPATH": "/root/osint_recon"})
     .add_local_dir(_local_dir, remote_path="/root/osint_recon")
@@ -46,4 +48,8 @@ import resolvers.username_enum  # noqa: F401
 import resolvers.github_deep  # noqa: F401
 import resolvers.breach  # noqa: F401
 import resolvers.social  # noqa: F401
+import resolvers.identity_correlator  # noqa: F401
+import resolvers.phone  # noqa: F401
+import resolvers.wallet  # noqa: F401
 import inference.extractor  # noqa: F401
+import agent.state  # noqa: F401

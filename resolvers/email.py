@@ -14,6 +14,8 @@ from emailrep import EmailRep
 from app import app, image, osint_secret
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
 from models import EntityType
+from resolvers._domain_blocklist import BLOCKED_DOMAINS
+from scan_log import log_scan_event
 from stream import write_stream_event
 
 logger = logging.getLogger(__name__)
@@ -22,8 +24,19 @@ SOURCE = "email_resolver"
 
 
 def _entity_key(etype: str, value: str) -> str:
-    v = value.strip().lower()
+    v = (str(value) if not isinstance(value, str) else value).strip().lower()
     return f"{etype}:{v}"
+
+
+def _safe_str(val: Any) -> str | None:
+    """Coerce a value to a stripped string, returning None for dicts/None/empty."""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val.strip() or None
+    if isinstance(val, dict):
+        return None
+    return str(val).strip() or None
 
 
 def _backoff(attempt: int, retry_after: int | None = None) -> None:
@@ -45,7 +58,6 @@ def resolve_email(
     """Resolve an email via Hunter.io, EmailRep.io, Gravatar, HIBP, and Kickbox."""
     if not scan_id:
         return
-    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
@@ -68,8 +80,30 @@ def resolve_email(
         )
         if r.status_code == 200:
             metadata["disposable"] = r.json().get("disposable", False)
+        elif r.status_code != 404:
+            response_preview = (r.text or "")[:500]
+            logger.warning("Kickbox returned status %s for %s: %s", r.status_code, email, response_preview)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_email",
+                entity_key=node_id,
+                error=f"Kickbox status {r.status_code}",
+                service="Kickbox",
+                response_preview=response_preview,
+            )
     except Exception as e:
+        response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
         logger.warning("Kickbox check failed for %s: %s", email, e)
+        log_scan_event(
+            scan_id,
+            "resolver_failed",
+            resolver="resolve_email",
+            entity_key=node_id,
+            error=str(e),
+            service="Kickbox",
+            response_preview=response_preview,
+        )
 
     # 2. WhoisXML Email Verification API — SMTP/DNS/disposable/free/catch-all checks
     whoisxml_key = os.environ.get("WHOISXML_KEY", "")
@@ -101,7 +135,17 @@ def resolve_email(
                 if mx_records:
                     metadata["whoisxml_email_mx_records"] = mx_records
         except Exception as e:
+            response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
             logger.warning("WhoisXML Email Verification failed for %s: %s", email, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_email",
+                entity_key=node_id,
+                error=str(e),
+                service="WhoisXML Email Verification",
+                response_preview=response_preview,
+            )
 
     # 3. Gravatar — hash email, fetch profile JSON
     try:
@@ -134,7 +178,17 @@ def resolve_email(
                     "confidence": 0.8,
                 })
     except Exception as e:
+        response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
         logger.warning("Gravatar check failed for %s: %s", email, e)
+        log_scan_event(
+            scan_id,
+            "resolver_failed",
+            resolver="resolve_email",
+            entity_key=node_id,
+            error=str(e),
+            service="Gravatar",
+            response_preview=response_preview,
+        )
 
     # 4. Hunter.io — email verifier + person enrichment
     hunter_key = os.environ.get("HUNTER_API_KEY", "")
@@ -166,7 +220,9 @@ def resolve_email(
                             for s in sources[:10]
                         ]
                     hdomain = (hdata.get("domain") or "").strip()
-                    if hdomain and "." in hdomain:
+                    if hdomain and "." in hdomain and hdomain.lower() in BLOCKED_DOMAINS:
+                        log_scan_event(scan_id, "entity_skipped", reason="blocklist", entity_key=_entity_key(EntityType.DOMAIN.value, hdomain))
+                    elif hdomain and "." in hdomain:
                         dk = _entity_key(EntityType.DOMAIN.value, hdomain)
                         to_push.append({
                             "type": EntityType.DOMAIN.value,
@@ -188,7 +244,17 @@ def resolve_email(
                     continue
                 break
             except Exception as e:
+                response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
                 logger.warning("Hunter.io verifier failed for %s (attempt %s): %s", email, attempt + 1, e)
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_email",
+                    entity_key=node_id,
+                    error=str(e),
+                    service="Hunter.io verifier",
+                    response_preview=response_preview,
+                )
                 _backoff(attempt)
 
         # 3b. Person Enrichment — name, location, social handles
@@ -202,17 +268,29 @@ def resolve_email(
                 )
                 if r.status_code == 200:
                     pdata = r.json().get("data", {})
-                    metadata["hunter_full_name"] = pdata.get("full_name")
-                    metadata["hunter_position"] = pdata.get("position")
-                    metadata["hunter_headline"] = pdata.get("headline")
-                    metadata["hunter_city"] = pdata.get("city")
-                    metadata["hunter_country"] = pdata.get("country")
-                    metadata["hunter_company"] = pdata.get("company")
-                    metadata["hunter_linkedin"] = pdata.get("linkedin")
-                    metadata["hunter_twitter"] = pdata.get("twitter")
-                    metadata["hunter_github"] = pdata.get("github")
+
+                    name_obj = pdata.get("name") or {}
+                    employment_obj = pdata.get("employment") or {}
+                    geo_obj = pdata.get("geo") or {}
+
+                    metadata["hunter_full_name"] = _safe_str(name_obj.get("fullName") if isinstance(name_obj, dict) else name_obj)
+                    metadata["hunter_position"] = _safe_str(employment_obj.get("title") if isinstance(employment_obj, dict) else employment_obj)
+                    metadata["hunter_headline"] = _safe_str(pdata.get("bio"))
+                    metadata["hunter_city"] = _safe_str(geo_obj.get("city") if isinstance(geo_obj, dict) else geo_obj)
+                    metadata["hunter_country"] = _safe_str(geo_obj.get("country") if isinstance(geo_obj, dict) else geo_obj)
+                    metadata["hunter_company"] = _safe_str(employment_obj.get("name") if isinstance(employment_obj, dict) else employment_obj)
+                    metadata["hunter_linkedin"] = _safe_str(pdata.get("linkedin", {}).get("handle") if isinstance(pdata.get("linkedin"), dict) else pdata.get("linkedin"))
+                    metadata["hunter_twitter"] = _safe_str(pdata.get("twitter", {}).get("handle") if isinstance(pdata.get("twitter"), dict) else pdata.get("twitter"))
+                    metadata["hunter_github"] = _safe_str(pdata.get("github", {}).get("handle") if isinstance(pdata.get("github"), dict) else pdata.get("github"))
+
                     for social_key in ("twitter", "github"):
-                        handle = (pdata.get(social_key) or "").strip()
+                        raw = pdata.get(social_key)
+                        if isinstance(raw, dict):
+                            handle = (raw.get("handle") or "").strip()
+                        elif isinstance(raw, str):
+                            handle = raw.strip()
+                        else:
+                            handle = ""
                         if handle:
                             uk = _entity_key(EntityType.USERNAME.value, handle)
                             to_push.append({
@@ -237,7 +315,17 @@ def resolve_email(
                     continue
                 break
             except Exception as e:
+                response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
                 logger.warning("Hunter.io person enrichment failed for %s (attempt %s): %s", email, attempt + 1, e)
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_email",
+                    entity_key=node_id,
+                    error=str(e),
+                    service="Hunter.io person enrichment",
+                    response_preview=response_preview,
+                )
                 _backoff(attempt)
 
     # 5. EmailRep.io — reputation + breach presence (official library; works without API key)
@@ -272,8 +360,25 @@ def resolve_email(
                 })
         elif isinstance(erdata, dict) and ("detail" in erdata or "error" in erdata):
             logger.warning("EmailRep.io returned error for %s: %s", email, erdata.get("detail", erdata.get("error")))
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_email",
+                entity_key=node_id,
+                error=str(erdata.get("detail", erdata.get("error"))),
+                service="EmailRep.io",
+                response_preview=str(erdata)[:500],
+            )
     except Exception as e:
         logger.warning("EmailRep.io check failed for %s: %s", email, e)
+        log_scan_event(
+            scan_id,
+            "resolver_failed",
+            resolver="resolve_email",
+            entity_key=node_id,
+            error=str(e),
+            service="EmailRep.io",
+        )
 
     # 6. HIBP — breach lookup, paste lookup, and stealer logs (v3)
     hibp_key = os.environ.get("HIBP_KEY", "")
@@ -313,7 +418,17 @@ def resolve_email(
                     continue
                 break
             except Exception as e:
+                response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
                 logger.warning("HIBP breaches attempt %s failed for %s: %s", attempt + 1, email, e)
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_email",
+                    entity_key=node_id,
+                    error=str(e),
+                    service="HIBP breachedaccount",
+                    response_preview=response_preview,
+                )
                 _backoff(attempt)
 
         # 6b. Pastes for account
@@ -345,7 +460,17 @@ def resolve_email(
                     continue
                 break
             except Exception as e:
+                response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
                 logger.warning("HIBP pastes attempt %s failed for %s: %s", attempt + 1, email, e)
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_email",
+                    entity_key=node_id,
+                    error=str(e),
+                    service="HIBP pasteaccount",
+                    response_preview=response_preview,
+                )
                 _backoff(attempt)
 
         # 6c. Stealer logs by email (requires Pwned 5+ subscription; silently skipped on 401/403)
@@ -367,7 +492,17 @@ def resolve_email(
                     continue
                 break
             except Exception as e:
+                response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
                 logger.warning("HIBP stealer logs attempt %s failed for %s: %s", attempt + 1, email, e)
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_email",
+                    entity_key=node_id,
+                    error=str(e),
+                    service="HIBP stealerlogsbyemail",
+                    response_preview=response_preview,
+                )
                 _backoff(attempt)
 
     # Write node
@@ -385,5 +520,3 @@ def resolve_email(
     for edge in edges_batch:
         write_stream_event(scan_id, "edge", edge)
 
-    for item in to_push:
-        q.put(item)

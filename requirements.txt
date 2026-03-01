@@ -9,3 +9,5 @@ pydantic>=2.9
 fastapi[standard]>=0.115
 emailrep
 leakcheck>=2.0.0
+disposable-email-domains
+anthropic>=0.49

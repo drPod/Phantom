@@ -13,6 +13,7 @@ import modal
 from app import app, image, osint_secret
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
 from models import EntityType
+from scan_log import log_scan_event
 from stream import write_stream_event
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ SOURCE = "domain_resolver"
 
 
 def _entity_key(etype: str, value: str) -> str:
-    v = value.strip().lower()
+    v = (str(value) if not isinstance(value, str) else value).strip().lower()
     return f"{etype}:{v}"
 
 
@@ -39,8 +40,17 @@ def _clean_domain(raw: str) -> str:
         else:
             parsed = urlparse(raw)
         return parsed.hostname or raw
-    except Exception:
+    except Exception as e:
+        logger.debug("_clean_domain failed for %s: %s", raw[:50] if raw else "", e)
         return raw
+
+
+def _response_preview(r: Any, max_len: int = 500) -> str:
+    """Return first max_len chars of response text for logging."""
+    try:
+        return (getattr(r, "text", None) or "")[:max_len]
+    except Exception:
+        return ""
 
 
 @app.function(image=image, secrets=[osint_secret])
@@ -55,7 +65,6 @@ def resolve_domain(
     """Resolve a domain via crt.sh, WhoisXML, DNS lookups, and SecurityTrails."""
     if not scan_id:
         return
-    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
@@ -100,8 +109,30 @@ def resolve_domain(
             metadata["crt_sh_orgs"] = sorted(org_set)[:20]
             for sub in list(subdomain_set)[:30]:
                 discovered_domains.add(sub)
+        else:
+            response_preview = _response_preview(r)
+            logger.warning("crt.sh returned status %s for %s: %s", r.status_code, domain, response_preview)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=f"crt.sh status {r.status_code}",
+                service="crt.sh",
+                response_preview=response_preview,
+            )
     except Exception as e:
+        response_preview = _response_preview(getattr(e, "response", None))
         logger.warning("crt.sh failed for %s: %s", domain, e)
+        log_scan_event(
+            scan_id,
+            "resolver_failed",
+            resolver="resolve_domain",
+            entity_key=node_id,
+            error=str(e),
+            service="crt.sh",
+            response_preview=response_preview,
+        )
 
     # 2. DNS lookups (A, MX, TXT) via dnspython
     try:
@@ -126,12 +157,20 @@ def resolve_domain(
                 elif rtype == "TXT":
                     txt_records = [b.decode("utf-8", errors="replace") for rdata in answers for b in rdata.strings]
                     metadata["dns_txt"] = txt_records
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("DNS %s lookup failed for %s: %s", rtype, domain, e)
     except ImportError:
-        logger.warning("dnspython not available")
+        logger.warning("dnspython not available (service=DNS)")
     except Exception as e:
         logger.warning("DNS lookup failed for %s: %s", domain, e)
+        log_scan_event(
+            scan_id,
+            "resolver_failed",
+            resolver="resolve_domain",
+            entity_key=node_id,
+            error=str(e),
+            service="DNS",
+        )
 
     # 3. WhoisXML API
     whoisxml_key = os.environ.get("WHOISXML_KEY", "")
@@ -199,7 +238,17 @@ def resolve_domain(
                     if phone:
                         metadata.setdefault("whois_phones", []).append(phone)
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("WhoisXML failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="WhoisXML WhoisService",
+                response_preview=response_preview,
+            )
 
     # 3b. WhoisXML Subdomains Lookup API
     if whoisxml_key:
@@ -224,7 +273,17 @@ def resolve_domain(
                         if cleaned and cleaned != domain:
                             discovered_domains.add(cleaned)
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("WhoisXML Subdomains API failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="WhoisXML Subdomains",
+                response_preview=response_preview,
+            )
 
     # 3c. WhoisXML Website Contacts API — emails, phones, social links, company names
     if whoisxml_key:
@@ -264,7 +323,17 @@ def resolve_domain(
                 if postal:
                     metadata["website_postal_addresses"] = postal[:5]
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("WhoisXML Website Contacts API failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="WhoisXML Website Contacts",
+                response_preview=response_preview,
+            )
 
     # 3d. WhoisXML SSL Certificates API — harvest SANs as additional domains
     if whoisxml_key:
@@ -300,7 +369,17 @@ def resolve_domain(
                     metadata["ssl_valid_to"] = cert.get("validTo")
                     metadata["ssl_issuer"] = cert.get("issuer", {}).get("organization")
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("WhoisXML SSL Certificates API failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="WhoisXML SSL Certificates",
+                response_preview=response_preview,
+            )
 
     # 4. SecurityTrails — historical DNS + subdomains
     sectrails_key = os.environ.get("SECURITYTRAILS_KEY", "")
@@ -318,7 +397,17 @@ def resolve_domain(
                     fqdn = f"{sub}.{domain}"
                     discovered_domains.add(fqdn)
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("SecurityTrails subdomains failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="SecurityTrails subdomains",
+                response_preview=response_preview,
+            )
 
         try:
             r = httpx.get(
@@ -336,7 +425,17 @@ def resolve_domain(
                             historical_ips.append(ip)
                 metadata["securitytrails_historical_ips"] = historical_ips
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("SecurityTrails history failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="SecurityTrails history",
+                response_preview=response_preview,
+            )
 
         try:
             r = httpx.get(
@@ -355,7 +454,17 @@ def resolve_domain(
                 for ad in assoc_domains[:10]:
                     discovered_domains.add(ad)
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("SecurityTrails associated failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="SecurityTrails associated",
+                response_preview=response_preview,
+            )
 
     # 5. Hunter.io — company enrichment + domain search
     hunter_key = os.environ.get("HUNTER_API_KEY", "")
@@ -385,7 +494,17 @@ def resolve_domain(
                         t.get("name") for t in tech[:20] if t.get("name")
                     ]
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("Hunter.io company enrichment failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="Hunter.io company enrichment",
+                response_preview=response_preview,
+            )
 
         # 5b. Domain Search — discover up to 10 emails on this domain
         hunter_emails: list[str] = []
@@ -404,7 +523,17 @@ def resolve_domain(
                     if em and "@" in em:
                         hunter_emails.append(em)
         except Exception as e:
+            response_preview = _response_preview(getattr(e, "response", None))
             logger.warning("Hunter.io domain search failed for %s: %s", domain, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_domain",
+                entity_key=node_id,
+                error=str(e),
+                service="Hunter.io domain search",
+                response_preview=response_preview,
+            )
 
         for em in hunter_emails:
             ek = _entity_key(EntityType.EMAIL.value, em)
@@ -477,5 +606,3 @@ def resolve_domain(
     for edge in edges_batch:
         write_stream_event(scan_id, "edge", edge)
 
-    for item in to_push:
-        q.put(item)

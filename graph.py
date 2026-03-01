@@ -26,13 +26,16 @@ def build_from_dict(d: dict[str, Any]) -> dict[str, Any]:
     for key, val in d.items():
         if key.startswith(NODE_PREFIX) and isinstance(val, dict):
             node_id = key[len(NODE_PREFIX) :]
-            if node_id not in seen_node_ids:
-                seen_node_ids.add(node_id)
-                nodes.append(_normalize_node(node_id, val))
+            node = _normalize_node(node_id, val)
+            if node["id"] not in seen_node_ids:
+                seen_node_ids.add(node["id"])
+                nodes.append(node)
         elif key.startswith(EDGES_BATCH_PREFIX) and isinstance(val, list):
             for e in val:
                 if isinstance(e, dict) and "source" in e and "target" in e:
                     edges.append(_normalize_edge(e))
+
+    edges = [e for e in edges if e["source"] in seen_node_ids and e["target"] in seen_node_ids]
 
     return {"nodes": nodes, "edges": edges}
 

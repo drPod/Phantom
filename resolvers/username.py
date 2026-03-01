@@ -13,8 +13,10 @@ import requests
 # not importing orchestrator here.
 from app import app, image, osint_secret
 
-from models import Entity, EntityType
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
+from models import EntityType
+from resolvers._domain_blocklist import BLOCKED_DOMAINS
+from scan_log import log_scan_event
 from stream import write_stream_event
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ SOURCE = "github"
 
 
 def _entity_key(etype: str, value: str) -> str:
-    v = value.strip().lower()
+    v = (str(value) if not isinstance(value, str) else value).strip().lower()
     return f"{etype}:{v}"
 
 
@@ -33,32 +35,6 @@ def _backoff(attempt: int, retry_after: int | None = None) -> None:
         time.sleep(min(retry_after, 60))
     else:
         time.sleep(min(2**attempt, 60))
-
-
-@app.function(image=image, secrets=[osint_secret])
-def _gpu_extract_github_bio(bio: str, scan_id: str, source_node_id: str, depth: int) -> None:
-    """Extract entities from a GitHub bio using the GPU EntityExtractor and push to queue."""
-    try:
-        from inference.extractor import EntityExtractor
-        result = EntityExtractor().extract_entities.remote(bio)
-        q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
-        for email in (result.get("emails") or []):
-            email = str(email).strip().lower()
-            if "@" in email:
-                q.put({"type": EntityType.EMAIL.value, "value": email, "source": "gpu_extract",
-                       "confidence": 0.8, "depth": depth + 1, "parent_key": source_node_id})
-        for uname in (result.get("usernames") or []):
-            uname = str(uname).strip().lower()
-            if uname:
-                q.put({"type": EntityType.USERNAME.value, "value": uname, "source": "gpu_extract",
-                       "confidence": 0.7, "depth": depth + 1, "parent_key": source_node_id})
-        for domain in (result.get("domains") or []):
-            domain = str(domain).strip().lower()
-            if domain and "." in domain:
-                q.put({"type": EntityType.DOMAIN.value, "value": domain, "source": "gpu_extract",
-                       "confidence": 0.7, "depth": depth + 1, "parent_key": source_node_id})
-    except Exception:
-        pass
 
 
 @app.function(image=image, secrets=[osint_secret])
@@ -76,7 +52,6 @@ def resolve_github(
     """
     if not scan_id:
         return
-    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
@@ -89,6 +64,7 @@ def resolve_github(
         headers["Authorization"] = f"Bearer {token}"
     url = f"{GITHUB_API}/users/{requests.utils.quote(username, safe='')}"
     last_error: Exception | None = None
+    last_response_preview: str = ""
     for attempt in range(4):
         try:
             r = requests.get(url, headers=headers, timeout=15)
@@ -109,11 +85,21 @@ def resolve_github(
             break
         except requests.RequestException as e:
             last_error = e
+            last_response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
             logger.warning("GitHub request attempt %s failed: %s", attempt + 1, e)
             _backoff(attempt)
     else:
         if last_error:
             logger.exception("GitHub resolver failed for %s: %s", username, last_error)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_github",
+                entity_key=_entity_key(EntityType.USERNAME.value, username),
+                error=str(last_error),
+                service="GitHub API",
+                response_preview=last_response_preview,
+            )
         return
 
     # Build node for this user
@@ -172,7 +158,9 @@ def resolve_github(
         try:
             from urllib.parse import urlparse
             domain = urlparse(blog).netloc
-            if domain and "." in domain:
+            if domain and "." in domain and domain.lower() in BLOCKED_DOMAINS:
+                log_scan_event(scan_id, "entity_skipped", reason="blocklist", entity_key=_entity_key(EntityType.DOMAIN.value, domain))
+            elif domain and "." in domain:
                 dk = _entity_key(EntityType.DOMAIN.value, domain)
                 to_push.append(
                     {
@@ -185,21 +173,19 @@ def resolve_github(
                     }
                 )
                 edges_batch.append({"source": node_id, "target": dk, "relationship": "has_blog_domain", "confidence": 0.8})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Blog domain parse failed for %s (blog=%s): %s", username, blog[:50], e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_github",
+                entity_key=node_id,
+                error=str(e),
+                service="blog_domain_parse",
+            )
 
     batch_key = f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"
     d[batch_key] = edges_batch
     for edge in edges_batch:
         write_stream_event(scan_id, "edge", edge)
 
-    for item in to_push:
-        q.put(item)
-
-    # Non-blocking GPU bio extraction — spawn so resolver returns immediately
-    bio = (data.get("bio") or "").strip()
-    if bio:
-        try:
-            _gpu_extract_github_bio.spawn(bio, scan_id, node_id, depth)
-        except Exception:
-            pass

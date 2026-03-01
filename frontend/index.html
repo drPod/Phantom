@@ -31,7 +31,6 @@
       font-family: var(--font);
       font-size: 13px;
       overflow: hidden;
-      user-select: none;
     }
 
     /* ── layout ─────────────────────────────────────────────────── */
@@ -311,6 +310,116 @@
     .detail-key { color: var(--text2); font-size: 10px; letter-spacing: 1px; }
     .detail-val { color: var(--text); font-size: 12px; word-break: break-all; }
 
+    /* ── collapsible metadata sections ─────────────────────────── */
+    .meta-section { margin-bottom: 8px; }
+
+    .meta-section-header {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      padding: 4px 0;
+      user-select: none;
+    }
+    .meta-section-header:hover .meta-section-label { color: var(--text); }
+
+    .meta-section-chevron {
+      color: var(--text2);
+      font-size: 9px;
+      transition: transform 0.15s;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .meta-section-chevron.open { transform: rotate(90deg); }
+
+    .meta-section-label {
+      color: var(--text2);
+      font-size: 10px;
+      letter-spacing: 1px;
+      flex: 1;
+    }
+
+    .meta-section-badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 8px;
+      letter-spacing: 0;
+      flex-shrink: 0;
+    }
+
+    .meta-section-body {
+      overflow: hidden;
+      max-height: 2000px;
+      transition: max-height 0.2s ease;
+    }
+    .meta-section-body.collapsed { max-height: 0; }
+
+    .meta-card {
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--accent);
+      border-radius: 3px;
+      padding: 6px 8px;
+      margin-bottom: 5px;
+      background: var(--bg3);
+    }
+    .meta-card-index {
+      color: var(--text2);
+      font-size: 9px;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .meta-card-kv {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 3px;
+      flex-wrap: wrap;
+    }
+    .meta-card-key {
+      color: var(--text2);
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+    .meta-card-val {
+      color: var(--text);
+      font-size: 10px;
+      word-break: break-all;
+    }
+    .meta-card-val a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .meta-card-val a:hover { text-decoration: underline; }
+
+    .meta-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 4px 0;
+    }
+    .meta-list li {
+      color: var(--text);
+      font-size: 11px;
+      padding: 2px 0 2px 8px;
+      border-left: 1px solid var(--border2);
+      margin-bottom: 2px;
+      word-break: break-all;
+    }
+    .meta-list li a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .meta-list li a:hover { text-decoration: underline; }
+
+    .meta-obj-group {
+      padding-left: 8px;
+      border-left: 1px solid var(--border2);
+      margin-bottom: 4px;
+    }
+    .meta-obj-kv { margin-bottom: 3px; }
+    .meta-obj-key { color: var(--text2); font-size: 10px; letter-spacing: 1px; }
+    .meta-obj-val { color: var(--text); font-size: 11px; word-break: break-all; }
+
     /* ── stats bar ──────────────────────────────────────────────── */
     #statsbar {
       flex: 0 0 auto;
@@ -344,10 +453,259 @@
     }
     #export-btn:hover { background: rgba(80,200,120,0.12); }
 
+    #report-btn {
+      background: transparent;
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      padding: 4px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #report-btn:hover { background: rgba(255,215,0,0.1); box-shadow: 0 0 8px rgba(255,215,0,0.3); }
+
+    /* ── report modal ───────────────────────────────────────────────── */
+    #report-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }
+    #report-overlay.open { display: flex; }
+
+    #report-modal {
+      background: var(--bg2);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      width: min(860px, 94vw);
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.6);
+    }
+
+    #report-modal-header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #report-modal-title {
+      font-size: 12px;
+      letter-spacing: 3px;
+      color: var(--gold);
+      font-weight: bold;
+    }
+
+    #report-modal-close {
+      background: none;
+      border: none;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+    #report-modal-close:hover { color: var(--text); }
+
+    #report-modal-body {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 20px 24px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border2) transparent;
+      line-height: 1.7;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    /* Markdown-like report styling */
+    #report-modal-body h1 {
+      font-size: 16px;
+      letter-spacing: 4px;
+      color: var(--gold);
+      text-shadow: 0 0 10px rgba(255,215,0,0.4);
+      margin-bottom: 18px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border2);
+    }
+    #report-modal-body h2 {
+      font-size: 12px;
+      letter-spacing: 3px;
+      color: var(--accent);
+      margin-top: 22px;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    #report-modal-body p {
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    #report-modal-body ul, #report-modal-body ol {
+      margin: 6px 0 10px 18px;
+    }
+    #report-modal-body li {
+      margin-bottom: 4px;
+    }
+    #report-modal-body strong, #report-modal-body b {
+      color: var(--text);
+      font-weight: bold;
+    }
+    #report-modal-body code {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--font);
+      font-size: 11px;
+      color: var(--accent);
+    }
+    .report-risk-critical { color: #FF4444; font-weight: bold; }
+    .report-risk-high     { color: #FF8C42; font-weight: bold; }
+    .report-risk-medium   { color: #FFD700; font-weight: bold; }
+    .report-risk-low      { color: #50C878; font-weight: bold; }
+    .report-risk-none     { color: var(--text2); }
+
+    #report-modal-footer {
+      flex: 0 0 auto;
+      padding: 10px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    #report-copy-btn {
+      background: transparent;
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 5px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #report-copy-btn:hover { color: var(--text); border-color: var(--text2); }
+
+    #report-generating {
+      font-size: 11px;
+      color: var(--text2);
+      letter-spacing: 1px;
+      animation: scanning-blink 1.1s ease-in-out infinite;
+    }
+
+    /* ── narration feed ─────────────────────────────────────────── */
+    #narration-feed {
+      flex: 0 0 auto;
+      height: 28px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      overflow: hidden;
+      position: relative;
+    }
+    #narration-feed.hidden { display: none; }
+
+    .narration-msg {
+      font-size: 11px;
+      font-family: var(--font);
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      animation: narration-slide-in 0.25s ease-out;
+      flex-shrink: 1;
+      min-width: 0;
+    }
+    @keyframes narration-slide-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .narration-prefix {
+      flex-shrink: 0;
+      margin-right: 6px;
+      font-size: 10px;
+    }
+
+    .narration-msg.cat-start      { color: var(--accent); }
+    .narration-msg.cat-resolver   { color: var(--text2); }
+    .narration-msg.cat-result     { color: var(--success); }
+    .narration-msg.cat-warning    { color: var(--warn); }
+    .narration-msg.cat-analysis   { color: var(--gold); }
+    .narration-msg.cat-enrichment { color: #9B59B6; }
+    .narration-msg.cat-report     { color: var(--gold); }
+    .narration-msg.cat-complete   { color: var(--success); }
+    .narration-msg.cat-info       { color: var(--text2); }
+
     /* ── D3 graph styles ────────────────────────────────────────── */
     .link {
       stroke-opacity: 0.55;
       fill: none;
+    }
+
+    .link-correlation {
+      stroke: var(--gold) !important;
+      stroke-dasharray: 6 3;
+      stroke-opacity: 0.85 !important;
+    }
+
+    .link-gpu {
+      stroke: #9B59B6 !important;
+      stroke-dasharray: 2 2;
+      stroke-opacity: 0.6 !important;
+    }
+
+    .identity-hull {
+      fill: rgba(255, 215, 0, 0.06);
+      stroke: var(--gold);
+      stroke-width: 1.2;
+      stroke-opacity: 0.35;
+      stroke-dasharray: 4 2;
+      pointer-events: none;
+    }
+
+    /* ── edge legend ─────────────────────────────────────────────── */
+    #edge-legend {
+      position: absolute;
+      bottom: 12px;
+      left: 14px;
+      background: rgba(10, 14, 26, 0.82);
+      border: 1px solid var(--border2);
+      border-radius: 4px;
+      padding: 7px 11px;
+      font-family: var(--font);
+      font-size: 10px;
+      color: var(--text2);
+      letter-spacing: 0.5px;
+      pointer-events: none;
+      line-height: 1.9;
+    }
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .legend-line {
+      width: 26px;
+      height: 0;
+      flex-shrink: 0;
     }
 
     .node-circle {
@@ -373,10 +731,174 @@
       animation: node-pop 0.4s ease-out forwards;
     }
     @keyframes node-pop {
-      0%   { r: 0; opacity: 0; }
-      60%  { r: calc(var(--r) * 1.25); opacity: 1; }
-      100% { r: var(--r); opacity: 1; }
+      0%   { opacity: 0; }
+      60%  { opacity: 1; }
+      100% { opacity: 1; }
     }
+
+    .shake {
+      animation: shake 0.4s ease-in-out;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%      { transform: translateX(-6px); }
+      40%      { transform: translateX(6px); }
+      60%      { transform: translateX(-4px); }
+      80%      { transform: translateX(4px); }
+    }
+
+    /* ── debug panel ──────────────────────────────────────────────── */
+    #debug-toggle {
+      background: transparent;
+      border: 1px solid #9B59B6;
+      color: #9B59B6;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      padding: 8px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #debug-toggle:hover {
+      background: rgba(155,89,182,0.1);
+      box-shadow: 0 0 10px rgba(155,89,182,0.3);
+    }
+    #debug-toggle.active {
+      background: rgba(155,89,182,0.25);
+      border-color: #9B59B6;
+      box-shadow: 0 0 8px rgba(155,89,182,0.4);
+    }
+
+    #debug-panel {
+      position: fixed;
+      right: 0;
+      top: 96px;
+      width: 400px;
+      height: calc(100vh - 96px);
+      background: var(--bg);
+      border-left: 1px solid var(--border);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(100%);
+      transition: transform 0.2s ease-out;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.4);
+    }
+    #debug-panel.open {
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+    #debug-panel:not(.open) {
+      pointer-events: none;
+    }
+
+    #debug-resolver-section {
+      flex: 0 0 auto;
+      max-height: 40%;
+      min-height: 120px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #debug-resolver-section .section-title {
+      flex: 0 0 auto;
+      padding: 8px 12px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+    }
+    #debug-resolver-table-wrap {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border2) transparent;
+    }
+    #debug-resolver-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10px;
+    }
+    #debug-resolver-table th {
+      text-align: left;
+      padding: 6px 8px;
+      color: var(--text2);
+      font-weight: bold;
+      letter-spacing: 1px;
+      border-bottom: 1px solid var(--border2);
+      background: var(--bg2);
+    }
+    #debug-resolver-table td {
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    #debug-resolver-table tr.resolver-running td { color: var(--accent); }
+    #debug-resolver-table tr.resolver-done td { color: var(--success); }
+    #debug-resolver-table tr.resolver-failed {
+      background: rgba(255,68,68,0.12);
+    }
+    #debug-resolver-table tr.resolver-failed td { color: var(--error); }
+    #debug-resolver-table .entity-cell { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #debug-resolver-table .error-toggle { cursor: pointer; color: var(--error); }
+    #debug-resolver-table .error-detail { font-size: 9px; padding: 6px; background: rgba(0,0,0,0.3); margin-top: 4px; white-space: pre-wrap; word-break: break-all; }
+
+    #debug-activity-section {
+      flex: 1 1 auto;
+      min-height: 100px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #debug-activity-section .section-title {
+      flex: 0 0 auto;
+      padding: 8px 12px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+    }
+    #debug-activity-feed {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 8px;
+      font-size: 10px;
+      font-family: var(--font);
+      scrollbar-width: thin;
+      scrollbar-color: var(--border2) transparent;
+    }
+    .log-entry {
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(26,39,68,0.5);
+      line-height: 1.4;
+      word-break: break-all;
+    }
+    .log-entry .log-ts { color: var(--text2); margin-right: 6px; }
+    .log-entry.log-resolver_spawned .log-type { color: var(--accent); }
+    .log-entry.log-resolver_completed .log-type { color: var(--success); }
+    .log-entry.log-resolver_failed .log-type { color: var(--error); }
+    .log-entry.log-entity_skipped .log-type { color: var(--warn); }
+    .log-entry.log-gpu .log-type { color: var(--gold); }
+    .log-entry.log-node .log-type, .log-entry.log-edge .log-type { color: var(--text2); }
+    .log-entry.log-scan .log-type { color: var(--accent); }
+    .debug-placeholder { color: var(--text2) !important; }
+    .debug-error { color: var(--error) !important; }
+
+    #debug-stats-section {
+      flex: 0 0 auto;
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--bg2);
+      font-size: 10px;
+      color: var(--text2);
+      letter-spacing: 1px;
+    }
+    #debug-stats-section .stat-row { margin-bottom: 4px; }
+    #debug-stats-section .stat-row span { color: var(--text); }
   </style>
 </head>
 <body>
@@ -393,6 +915,7 @@
       <div id="sse-dot" class="idle"></div>
       <span id="sse-label">IDLE</span>
     </div>
+    <button id="debug-toggle">DEBUG</button>
   </div>
 
   <!-- ── input row ────────────────────────────────────────────────── -->
@@ -410,11 +933,34 @@
     <button id="stop-btn" class="hidden" disabled>STOP</button>
   </div>
 
+  <!-- ── narration feed ──────────────────────────────────────────── -->
+  <div id="narration-feed" class="hidden"></div>
+
   <!-- ── main ─────────────────────────────────────────────────────── -->
   <div id="main">
     <div id="graph-wrap">
       <svg id="graph"></svg>
       <div id="tooltip"></div>
+      <div id="edge-legend">
+        <div class="legend-row">
+          <svg width="26" height="10" style="flex-shrink:0">
+            <line x1="0" y1="5" x2="26" y2="5" stroke="#4A9EFF" stroke-width="1.8" stroke-opacity="0.7"/>
+          </svg>
+          <span>resolver link</span>
+        </div>
+        <div class="legend-row">
+          <svg width="26" height="10" style="flex-shrink:0">
+            <line x1="0" y1="5" x2="26" y2="5" stroke="#FFD700" stroke-width="2.5" stroke-dasharray="6 3" stroke-opacity="0.9"/>
+          </svg>
+          <span style="color:var(--gold)">identity correlation</span>
+        </div>
+        <div class="legend-row">
+          <svg width="26" height="10" style="flex-shrink:0">
+            <line x1="0" y1="5" x2="26" y2="5" stroke="#9B59B6" stroke-width="1.5" stroke-dasharray="2 2" stroke-opacity="0.8"/>
+          </svg>
+          <span style="color:#9B59B6">gpu extraction</span>
+        </div>
+      </div>
     </div>
 
     <div id="sidebar" class="collapsed">
@@ -434,6 +980,46 @@
     <span class="stat-item">ELAPSED: <span id="stat-elapsed">—</span></span>
     <span class="stat-item" style="color:#3a4f6a;">SCAN: <span id="stat-scanid" style="color:#3a4f6a;">—</span></span>
     <a id="export-btn" style="display:none">⬇ EXPORT JSON</a>
+    <button id="report-btn" style="display:none">📋 REPORT</button>
+    <span id="report-generating" style="display:none">GENERATING REPORT...</span>
+  </div>
+
+  <!-- ── report modal ──────────────────────────────────────────────── -->
+  <div id="report-overlay">
+    <div id="report-modal">
+      <div id="report-modal-header">
+        <div id="report-modal-title">INTELLIGENCE REPORT</div>
+        <button id="report-modal-close">×</button>
+      </div>
+      <div id="report-modal-body"></div>
+      <div id="report-modal-footer">
+        <button id="report-copy-btn">COPY MARKDOWN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── debug panel (overlay) ─────────────────────────────────────── -->
+  <div id="debug-panel">
+    <div id="debug-resolver-section">
+      <div class="section-title">RESOLVER TRACKER</div>
+      <div id="debug-resolver-table-wrap">
+        <table id="debug-resolver-table">
+          <thead><tr><th>Resolver</th><th>Entity</th><th>Status</th><th>Dur</th><th>N</th><th>E</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="debug-activity-section">
+      <div class="section-title">ACTIVITY FEED</div>
+      <div id="debug-activity-feed"></div>
+    </div>
+    <div id="debug-stats-section">
+      <div class="stat-row">Success: <span id="debug-stat-success">—</span></div>
+      <div class="stat-row">API calls: <span id="debug-stat-calls">—</span></div>
+      <div class="stat-row">Discovered / Skipped: <span id="debug-stat-entities">—</span></div>
+      <div class="stat-row">Progress: <span id="debug-stat-progress">—</span></div>
+      <div class="stat-row" style="margin-top:8px;font-size:9px;word-break:break-all;color:var(--text2);">API: <span id="debug-stat-api" title="Add ?api=URL to override">—</span></div>
+    </div>
   </div>
 
 </div>
@@ -443,26 +1029,53 @@
 // ════════════════════════════════════════════════════════════════════
 //  CONFIG
 // ════════════════════════════════════════════════════════════════════
-const API_BASE_URL = 'https://drpod--osint-recon-fastapi-app.modal.run';
+// API URL: use ?api=URL to override. Default is production. Add ?api=DEV_URL when using modal serve.
+const PROD_API = 'https://drpod--osint-recon-fastapi-app.modal.run';
+const DEV_API  = 'https://drpod--osint-recon-fastapi-app-dev.modal.run';
+const API_BASE_URL = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('api');
+  if (fromUrl && fromUrl.startsWith('http')) return fromUrl.replace(/\/$/, '');
+  return PROD_API;
+})();
 
 const NODE_COLORS = {
-  username: '#4A9EFF',
-  email:    '#FF8C42',
-  domain:   '#50C878',
-  ip:       '#FF4444',
-  phone:    '#9B59B6',
-  wallet:   '#F1C40F',
-  default:  '#7f8fa6',
+  username:         '#4A9EFF',
+  email:            '#FF8C42',
+  domain:           '#50C878',
+  ip:               '#FF4444',
+  phone:            '#9B59B6',
+  wallet:           '#F1C40F',
+  platform_profile: '#1ABC9C',
+  default:          '#7f8fa6',
 };
 
+const EDGE_CLASSES = {
+  correlation: new Set([
+    'likely_same_person',
+    'shared_password_hash',
+    'shared_ip_address',
+    'shared_phone',
+  ]),
+  gpu: new Set(['extracted_by_gpu']),
+};
+
+function edgeClass(d) {
+  const rel = d.relationship || 'linked_to';
+  if (EDGE_CLASSES.correlation.has(rel)) return 'correlation';
+  if (EDGE_CLASSES.gpu.has(rel)) return 'gpu';
+  return 'standard';
+}
+
 const TYPE_EMOJIS = {
-  username: '👤',
-  email:    '📧',
-  domain:   '🌐',
-  ip:       '🖥',
-  phone:    '📱',
-  wallet:   '💰',
-  default:  '◆',
+  username:         '👤',
+  email:            '📧',
+  domain:           '🌐',
+  ip:               '🖥',
+  phone:            '📱',
+  wallet:           '💰',
+  platform_profile: '🔗',
+  default:          '◆',
 };
 
 function nodeColor(d) {
@@ -509,6 +1122,14 @@ const nodesMap      = new Map();   // id → node obj
 const resolversSeen = new Set();   // unique resolver sources
 let   nodes         = [];
 let   links         = [];
+const pendingEdges  = [];          // edges buffered until both endpoints exist
+
+// Debug panel state
+let debugPanelOpen   = false;
+let debugPollTimer   = null;
+let debugActivityLog = [];        // merged from REST + SSE
+let debugResolverRows = [];       // derived from activity log
+let debugFeedNearBottom = true;   // for auto-scroll
 
 // ════════════════════════════════════════════════════════════════════
 //  D3 SETUP
@@ -556,8 +1177,37 @@ Object.entries(NODE_COLORS).forEach(([type, color]) => {
     .attr('fill-opacity', 0.65);
 });
 
+// Arrow marker for correlation edges (gold)
+defs.append('marker')
+  .attr('id',           'arrow-correlation')
+  .attr('viewBox',      '0 -5 10 10')
+  .attr('refX',         26)
+  .attr('refY',         0)
+  .attr('markerWidth',  7)
+  .attr('markerHeight', 7)
+  .attr('orient',       'auto')
+  .append('path')
+  .attr('d',    'M0,-5L10,0L0,5')
+  .attr('fill', '#FFD700')
+  .attr('fill-opacity', 0.9);
+
+// Arrow marker for GPU extraction edges (purple)
+defs.append('marker')
+  .attr('id',           'arrow-gpu')
+  .attr('viewBox',      '0 -5 10 10')
+  .attr('refX',         26)
+  .attr('refY',         0)
+  .attr('markerWidth',  6)
+  .attr('markerHeight', 6)
+  .attr('orient',       'auto')
+  .append('path')
+  .attr('d',    'M0,-5L10,0L0,5')
+  .attr('fill', '#9B59B6')
+  .attr('fill-opacity', 0.75);
+
 // ── layers ───────────────────────────────────────────────────────────
 const linkLayer = g.append('g').attr('class', 'link-layer');
+const hullLayer = g.append('g').attr('class', 'hull-layer');
 const nodeLayer = g.append('g').attr('class', 'node-layer');
 
 // ── simulation ───────────────────────────────────────────────────────
@@ -641,8 +1291,9 @@ function showNodeTooltip(event, d) {
 
   tooltip.innerHTML      = lines.join('<br>');
   tooltip.style.display  = 'block';
-  tooltip.style.left     = (event.pageX + 14) + 'px';
-  tooltip.style.top      = (event.pageY - 44) + 'px';
+  const graphRect = svg.node().getBoundingClientRect();
+  tooltip.style.left     = (event.clientX - graphRect.left + 14) + 'px';
+  tooltip.style.top      = (event.clientY - graphRect.top - 44) + 'px';
 }
 function hideTooltip() { tooltip.style.display = 'none'; }
 
@@ -660,18 +1311,43 @@ function updateGraph() {
   linkSel.exit().remove();
 
   const linkEnter = linkSel.enter().append('line')
-    .attr('class', 'link')
+    .attr('class', d => `link link-${edgeClass(d)}`)
     .attr('stroke', d => {
+      const ec = edgeClass(d);
+      if (ec === 'correlation') return '#FFD700';
+      if (ec === 'gpu') return '#9B59B6';
       const srcType = typeof d.source === 'object' ? d.source.type : 'default';
       return NODE_COLORS[srcType] || NODE_COLORS.default;
     })
-    .attr('stroke-width', d => Math.max(0.8, (d.confidence || 1.0) * 2.4))
+    .attr('stroke-width', d => {
+      const ec = edgeClass(d);
+      if (ec === 'correlation') return 2.5;
+      if (ec === 'gpu') return 1.2;
+      return Math.max(0.8, (d.confidence || 1.0) * 2.4);
+    })
+    .attr('stroke-opacity', d => {
+      const ec = edgeClass(d);
+      if (ec === 'correlation') return 0.85;
+      if (ec === 'gpu') return 0.6;
+      return 0.55;
+    })
+    .attr('stroke-dasharray', d => {
+      const ec = edgeClass(d);
+      if (ec === 'correlation') return '6 3';
+      if (ec === 'gpu') return '2 2';
+      return null;
+    })
     .attr('marker-end', d => {
+      const ec = edgeClass(d);
+      if (ec === 'correlation') return 'url(#arrow-correlation)';
+      if (ec === 'gpu') return 'url(#arrow-gpu)';
       const srcType = typeof d.source === 'object' ? d.source.type : 'default';
       return `url(#arrow-${srcType in NODE_COLORS ? srcType : 'default'})`;
     })
     .on('mouseover', (event, d) => {
-      showTooltip(event, d.relationship || 'linked_to');
+      const rel = d.relationship || 'linked_to';
+      const conf = d.confidence != null ? ` (${Math.round(d.confidence * 100)}%)` : '';
+      showTooltip(event, `${rel}${conf}`);
     })
     .on('mouseout', hideTooltip);
 
@@ -733,6 +1409,9 @@ function updateGraph() {
 
   nodeSel = nodeEnter.merge(nodeSel);
 
+  // update identity cluster hulls
+  updateHulls();
+
   // restart
   simulation.nodes(nodes);
   simulation.force('link').links(links);
@@ -744,6 +1423,85 @@ function showTooltip(event, text) {
   tooltip.style.display = 'block';
   tooltip.style.left    = (event.pageX + 14) + 'px';
   tooltip.style.top     = (event.pageY - 40) + 'px';
+}
+
+// ── identity cluster hulls ────────────────────────────────────────────
+let hullData = [];  // [{nodeIds: Set, label: string}]
+let hullSel  = hullLayer.selectAll('path.identity-hull');
+
+function buildHullClusters() {
+  // Union-Find over correlation edges to get connected components
+  const parent = new Map();
+  function find(id) {
+    if (!parent.has(id)) parent.set(id, id);
+    if (parent.get(id) !== id) parent.set(id, find(parent.get(id)));
+    return parent.get(id);
+  }
+  function union(a, b) {
+    parent.set(find(a), find(b));
+  }
+
+  links.forEach(l => {
+    if (edgeClass(l) === 'correlation') {
+      const sid = typeof l.source === 'object' ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' ? l.target.id : l.target;
+      union(sid, tid);
+    }
+  });
+
+  // Group nodes by root
+  const groups = new Map();
+  nodes.forEach(n => {
+    if (!parent.has(n.id)) return;
+    const root = find(n.id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(n);
+  });
+
+  hullData = [];
+  groups.forEach((members, root) => {
+    if (members.length >= 2) {
+      hullData.push({ members, root });
+    }
+  });
+}
+
+function updateHulls() {
+  buildHullClusters();
+  hullSel = hullLayer.selectAll('path.identity-hull')
+    .data(hullData, d => d.root);
+  hullSel.exit().remove();
+  hullSel = hullSel.enter().append('path')
+    .attr('class', 'identity-hull')
+    .merge(hullSel);
+}
+
+function tickHulls() {
+  hullSel.attr('d', d => {
+    const pad = 22;
+    const pts = d.members.map(n => [n.x || 0, n.y || 0]);
+    if (pts.length < 2) return null;
+    if (pts.length === 2) {
+      // Two-node cluster: draw a rounded capsule via a padded pseudo-hull
+      const [ax, ay] = pts[0];
+      const [bx, by] = pts[1];
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len * pad, ny = dx / len * pad;
+      return `M${ax + nx},${ay + ny} L${bx + nx},${by + ny} L${bx - nx},${by - ny} L${ax - nx},${ay - ny} Z`;
+    }
+    const hull = d3.polygonHull(pts);
+    if (!hull) return null;
+    // Expand hull outward by pad pixels
+    const cx = d3.mean(hull, p => p[0]);
+    const cy = d3.mean(hull, p => p[1]);
+    const expanded = hull.map(([px, py]) => {
+      const ddx = px - cx, ddy = py - cy;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
+      return [px + (ddx / dist) * pad, py + (ddy / dist) * pad];
+    });
+    return `M${expanded.map(p => p.join(',')).join('L')}Z`;
+  });
 }
 
 function ticked() {
@@ -766,6 +1524,7 @@ function ticked() {
     });
 
   nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  tickHulls();
 }
 
 function dragStarted(event, d) {
@@ -795,6 +1554,16 @@ const sidebarClose = document.getElementById('sidebar-close');
 
 sidebarClose.addEventListener('click', collapseSidebar);
 
+sidebarBody.addEventListener('click', e => {
+  const header = e.target.closest('.meta-section-header');
+  if (!header) return;
+  const body = header.nextElementSibling;
+  if (!body || !body.classList.contains('meta-section-body')) return;
+  const chevron = header.querySelector('.meta-section-chevron');
+  body.classList.toggle('collapsed');
+  if (chevron) chevron.classList.toggle('open', !body.classList.contains('collapsed'));
+});
+
 function collapseSidebar() {
   sidebar.classList.add('collapsed');
 }
@@ -816,18 +1585,13 @@ function showSidebar(d) {
   const meta = d.metadata || {};
   for (const [k, v] of Object.entries(meta)) {
     if (v === null || v === undefined || v === '') continue;
-    if (Array.isArray(v)) {
-      if (v.length === 0) continue;
-      html += `<div class="detail-kv"><div class="detail-key">${escHtml(k.toUpperCase())}</div><div class="detail-val">${v.length} items</div></div>`;
-    } else if (typeof v === 'object') {
-      continue;
-    } else {
-      html += `<div class="detail-kv"><div class="detail-key">${escHtml(k.toUpperCase())}</div><div class="detail-val">${escHtml(String(v))}</div></div>`;
-    }
+    html += renderMetaValue(k, v);
   }
 
   sidebarBody.innerHTML = html;
 }
+
+// ── metadata rendering helpers ────────────────────────────────────────
 
 function escHtml(s) {
   return String(s)
@@ -835,6 +1599,118 @@ function escHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function isArrayOfObjects(arr) {
+  return arr.length > 0 && arr.some(item => item !== null && typeof item === 'object' && !Array.isArray(item));
+}
+
+function looksLikeUrl(s) {
+  return typeof s === 'string' && (s.startsWith('http://') || s.startsWith('https://'));
+}
+
+function renderPrimitive(v) {
+  const s = String(v);
+  if (looksLikeUrl(s)) {
+    return `<a href="${escHtml(s)}" target="_blank" rel="noopener">${escHtml(s)}</a>`;
+  }
+  return escHtml(s);
+}
+
+function renderMetaValue(key, value) {
+  if (value === null || value === undefined || value === '') return '';
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '';
+    return renderArraySection(key, value);
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (entries.length === 0) return '';
+    return renderObjectSection(key, value);
+  }
+
+  // primitive
+  return `<div class="detail-kv"><div class="detail-key">${escHtml(key.toUpperCase())}</div><div class="detail-val">${renderPrimitive(value)}</div></div>`;
+}
+
+function renderArraySection(key, arr) {
+  const count = arr.length;
+  const startOpen = count <= 3;
+  const bodyClass = startOpen ? 'meta-section-body' : 'meta-section-body collapsed';
+  const chevronClass = startOpen ? 'meta-section-chevron open' : 'meta-section-chevron';
+
+  let inner = '';
+  if (isArrayOfObjects(arr)) {
+    arr.forEach((item, i) => {
+      inner += renderObjectCard(item, i);
+    });
+  } else {
+    inner += '<ul class="meta-list">';
+    arr.forEach(item => {
+      inner += `<li>${renderPrimitive(item)}</li>`;
+    });
+    inner += '</ul>';
+  }
+
+  return `<div class="meta-section">
+    <div class="meta-section-header">
+      <span class="${chevronClass}">&#9658;</span>
+      <span class="meta-section-label">${escHtml(key.toUpperCase())}</span>
+      <span class="meta-section-badge">${count}</span>
+    </div>
+    <div class="${bodyClass}">${inner}</div>
+  </div>`;
+}
+
+function renderObjectSection(key, obj) {
+  const entries = Object.entries(obj);
+  const count = entries.length;
+  const startOpen = count <= 5;
+  const bodyClass = startOpen ? 'meta-section-body' : 'meta-section-body collapsed';
+  const chevronClass = startOpen ? 'meta-section-chevron open' : 'meta-section-chevron';
+
+  let inner = '<div class="meta-obj-group">';
+  for (const [k, v] of entries) {
+    if (v === null || v === undefined || v === '') continue;
+    if (Array.isArray(v) || typeof v === 'object') {
+      inner += renderMetaValue(k, v);
+    } else {
+      inner += `<div class="meta-obj-kv"><div class="meta-obj-key">${escHtml(k.toUpperCase())}</div><div class="meta-obj-val">${renderPrimitive(v)}</div></div>`;
+    }
+  }
+  inner += '</div>';
+
+  return `<div class="meta-section">
+    <div class="meta-section-header">
+      <span class="${chevronClass}">&#9658;</span>
+      <span class="meta-section-label">${escHtml(key.toUpperCase())}</span>
+      <span class="meta-section-badge">${count}</span>
+    </div>
+    <div class="${bodyClass}">${inner}</div>
+  </div>`;
+}
+
+function renderObjectCard(item, index) {
+  if (item === null || typeof item !== 'object') {
+    return `<div class="meta-card"><div class="meta-card-index">#${index + 1}</div><div class="meta-card-val">${renderPrimitive(item)}</div></div>`;
+  }
+
+  let rows = '';
+  for (const [k, v] of Object.entries(item)) {
+    if (v === null || v === undefined || v === '') continue;
+    if (Array.isArray(v)) {
+      if (v.length === 0) continue;
+      rows += `<div class="meta-card-kv"><span class="meta-card-key">${escHtml(k.toUpperCase())}:</span><span class="meta-card-val">${v.map(renderPrimitive).join(', ')}</span></div>`;
+    } else if (typeof v === 'object') {
+      rows += `<div class="meta-card-kv"><span class="meta-card-key">${escHtml(k.toUpperCase())}:</span><span class="meta-card-val">{${Object.keys(v).length} fields}</span></div>`;
+    } else {
+      rows += `<div class="meta-card-kv"><span class="meta-card-key">${escHtml(k.toUpperCase())}:</span><span class="meta-card-val">${renderPrimitive(v)}</span></div>`;
+    }
+  }
+
+  return `<div class="meta-card"><div class="meta-card-index">#${index + 1}</div>${rows}</div>`;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -866,6 +1742,322 @@ function startElapsedTimer() {
 
 function stopElapsedTimer() {
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  DEBUG PANEL
+// ════════════════════════════════════════════════════════════════════
+const debugToggle  = document.getElementById('debug-toggle');
+const debugPanel    = document.getElementById('debug-panel');
+const debugFeedEl   = document.getElementById('debug-activity-feed');
+
+debugToggle.addEventListener('click', () => {
+  debugPanelOpen = !debugPanelOpen;
+  debugPanel.classList.toggle('open', debugPanelOpen);
+  debugToggle.classList.toggle('active', debugPanelOpen);
+  if (debugPanelOpen) {
+    updateDebugPanelPlaceholder();
+    startDebugPolling();
+  } else {
+    stopDebugPolling();
+  }
+});
+
+function buildResolverRowsFromLog(activityLog) {
+  const rows = [];
+  const pending = new Map(); // key: resolver+entity_key -> { resolver, entity_key, ts, seq }
+  for (const evt of activityLog) {
+    const resolver = evt.resolver;
+    const entityKey = evt.entity_key;
+    const key = resolver && entityKey ? `${resolver}::${entityKey}` : null;
+    if (evt.event_type === 'resolver_spawned' && key) {
+      pending.set(key, { resolver, entity_key: entityKey, status: 'running', ts: evt.ts, seq: evt.seq });
+    } else if (evt.event_type === 'resolver_completed' && key) {
+      const p = pending.get(key);
+      if (p) {
+        rows.push({
+          resolver: p.resolver,
+          entity_key: p.entity_key,
+          status: 'done',
+          duration_ms: Math.round((evt.duration || 0) * 1000),
+          nodes_found: evt.nodes_found ?? 0,
+          edges_found: evt.edges_found ?? 0,
+          error: null,
+          ts: p.ts,
+          seq: p.seq,
+        });
+        pending.delete(key);
+      }
+    } else if (evt.event_type === 'resolver_failed' && key) {
+      const p = pending.get(key);
+      if (p) {
+        rows.push({
+          resolver: p.resolver,
+          entity_key: p.entity_key,
+          status: 'failed',
+          duration_ms: null,
+          nodes_found: 0,
+          edges_found: 0,
+          error: evt.error || 'Unknown error',
+          ts: p.ts,
+          seq: p.seq,
+        });
+        pending.delete(key);
+      }
+    }
+  }
+  for (const [k, p] of pending) {
+    rows.push({
+      resolver: p.resolver,
+      entity_key: p.entity_key,
+      status: 'running',
+      duration_ms: null,
+      nodes_found: 0,
+      edges_found: 0,
+      error: null,
+      ts: p.ts,
+      seq: p.seq,
+    });
+  }
+  rows.sort((a, b) => (a.ts || 0) - (b.ts || 0) || (a.seq || 0) - (b.seq || 0));
+  return rows;
+}
+
+function updateDebugResolverTable(rows) {
+  const tbody = document.querySelector('#debug-resolver-table tbody');
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.className = `resolver-${r.status}`;
+    const entityShort = (r.entity_key || '—').length > 12 ? (r.entity_key || '').slice(0, 10) + '…' : (r.entity_key || '—');
+    const statusText = r.status === 'running' ? '…' : r.status === 'done' ? 'done' : 'fail';
+    const durText = r.duration_ms != null ? r.duration_ms + 'ms' : '—';
+    let lastCellContent = String(r.edges_found ?? '—');
+    if (r.status === 'failed' && r.error) {
+      const toggle = document.createElement('span');
+      toggle.className = 'error-toggle';
+      toggle.textContent = ' ▼';
+      toggle.style.cursor = 'pointer';
+      toggle.title = 'Expand error';
+      lastCellContent = '';
+      const errDiv = document.createElement('div');
+      errDiv.className = 'error-detail';
+      errDiv.style.display = 'none';
+      errDiv.textContent = r.error;
+      toggle.onclick = () => {
+        errDiv.style.display = errDiv.style.display === 'none' ? 'block' : 'none';
+        toggle.textContent = errDiv.style.display === 'none' ? ' ▼' : ' ▲';
+      };
+      tr.innerHTML = `<td>${escHtml(r.resolver || '—')}</td><td class="entity-cell" title="${escHtml(r.entity_key || '')}">${escHtml(entityShort)}</td><td>${statusText}</td><td>${durText}</td><td>${r.nodes_found ?? '—'}</td><td></td>`;
+      tr.querySelector('td:last-child').appendChild(toggle);
+      tr.querySelector('td:last-child').appendChild(errDiv);
+    } else {
+      tr.innerHTML = `<td>${escHtml(r.resolver || '—')}</td><td class="entity-cell" title="${escHtml(r.entity_key || '')}">${escHtml(entityShort)}</td><td>${statusText}</td><td>${durText}</td><td>${r.nodes_found ?? '—'}</td><td>${lastCellContent}</td>`;
+    }
+    tbody.appendChild(tr);
+  });
+}
+
+function formatLogSummary(evt) {
+  const et = evt.event_type || '';
+  if (et === 'resolver_spawned') return `${evt.resolver || '?'} → ${evt.entity_key || '?'}`;
+  if (et === 'resolver_completed') return `${evt.resolver || '?'} done (${evt.nodes_found ?? 0} nodes, ${evt.edges_found ?? 0} edges)`;
+  if (et === 'resolver_failed') return `${evt.resolver || '?'} failed: ${(evt.error || '?').slice(0, 40)}`;
+  if (et === 'entity_skipped') return `${evt.entity_key || '?'} skipped (${evt.reason || '?'})`;
+  if (et.startsWith('gpu_extraction')) return `GPU ${et.replace('gpu_extraction_', '')} ${evt.node_id || ''}`;
+  if (et === 'scan_started') return 'Scan started';
+  if (et === 'scan_finalized') return `Scan ${evt.status || 'done'}`;
+  if (et === 'node') return `Node: ${(evt.payload?.id || evt.id || '?').slice(0, 30)}`;
+  if (et === 'edge') return `Edge: ${(evt.payload?.source || evt.source || '?')} → ${(evt.payload?.target || evt.target || '?')}`;
+  return et || '—';
+}
+
+function logTypeClass(evt) {
+  const et = evt.event_type || evt.type || '';
+  if (et === 'resolver_spawned' || et === 'scan_started' || et === 'scan_finalized') return 'log-scan';
+  if (et === 'resolver_completed') return 'log-resolver_completed';
+  if (et === 'resolver_failed') return 'log-resolver_failed';
+  if (et === 'entity_skipped') return 'log-entity_skipped';
+  if (et.startsWith('gpu_extraction')) return 'log-gpu';
+  if (et === 'node' || et === 'edge') return 'log-node';
+  return 'log-scan';
+}
+
+function formatLogTs(ts) {
+  if (ts == null) return '--:--:--';
+  const d = new Date(ts * 1000);
+  return d.toTimeString().slice(0, 8);
+}
+
+function updateDebugActivityFeed(entries) {
+  // Remove any placeholder/error message
+  debugFeedEl.querySelectorAll('.debug-placeholder, .debug-error').forEach(el => el.remove());
+  const wasNearBottom = debugFeedEl.scrollHeight - debugFeedEl.scrollTop - debugFeedEl.clientHeight < 50;
+  const sel = d3.select(debugFeedEl).selectAll('.log-entry').data(entries, (d, i) => `${d.seq ?? i}-${d.ts ?? 0}-${(d.entity_key || '')}-${(d.resolver || '')}`);
+  sel.exit().remove();
+  const enter = sel.enter().append('div').attr('class', d => `log-entry ${logTypeClass(d)}`);
+  enter.append('span').attr('class', 'log-ts').text(d => `[${formatLogTs(d.ts)}]`);
+  enter.append('span').attr('class', 'log-type').text(d => (d.event_type || d.type || 'event'));
+  enter.append('span').text(d => ' — ' + formatLogSummary(d));
+  sel.merge(enter)
+    .attr('class', d => `log-entry ${logTypeClass(d)}`)
+    .select('.log-ts').text(d => `[${formatLogTs(d.ts)}]`);
+  sel.merge(enter).select('.log-type').text(d => (d.event_type || d.type || 'event'));
+  sel.merge(enter).select('span:last-child').text(d => ' — ' + formatLogSummary(d));
+  if (wasNearBottom) debugFeedEl.scrollTop = debugFeedEl.scrollHeight;
+}
+
+function showDebugPlaceholder(message, isError = false) {
+  debugFeedEl.querySelectorAll('.debug-placeholder, .debug-error').forEach(el => el.remove());
+  const p = document.createElement('div');
+  p.className = isError ? 'debug-error' : 'debug-placeholder';
+  p.style.cssText = 'padding:12px;color:var(--text2);font-size:11px;line-height:1.5;';
+  p.textContent = message;
+  debugFeedEl.appendChild(p);
+}
+
+function updateDebugPanelPlaceholder() {
+  const apiEl = document.getElementById('debug-stat-api');
+  if (apiEl) apiEl.textContent = API_BASE_URL;
+  if (!currentScanId) {
+    showDebugPlaceholder('No active scan. Start a scan to see debug output.');
+  }
+}
+
+function updateDebugStats(debugData) {
+  const resolverSummary = debugData?.resolver_summary || [];
+  const entityFlow = debugData?.entity_flow || {};
+  const activityLog = debugData?.activity_log || [];
+  let totalSuccess = 0, totalFail = 0, totalCalls = 0;
+  resolverSummary.forEach(r => {
+    totalSuccess += r.successes || 0;
+    totalFail += r.failures || 0;
+    totalCalls += r.calls || 0;
+  });
+  const rate = totalSuccess + totalFail > 0 ? Math.round(100 * totalSuccess / (totalSuccess + totalFail)) : 0;
+  document.getElementById('debug-stat-success').textContent = rate + '%';
+  document.getElementById('debug-stat-calls').textContent = totalCalls;
+  const discovered = entityFlow.discovered ?? 0;
+  const skipped = entityFlow.skipped ? Object.values(entityFlow.skipped).reduce((a, b) => a + b, 0) : 0;
+  document.getElementById('debug-stat-entities').textContent = `${discovered} / ${skipped}`;
+  let maxEntities = 500;
+  const scanStarted = activityLog.find(e => e.event_type === 'scan_started');
+  if (scanStarted?.config?.max_entities) maxEntities = scanStarted.config.max_entities;
+  const processed = entityFlow.processed ?? 0;
+  document.getElementById('debug-stat-progress').textContent = `${processed} / ${maxEntities}`;
+}
+
+function updateDebugStatsFromLegacy(debugData) {
+  const sr = debugData.scan_results || {};
+  const status = sr.status || 'unknown';
+  const entitiesSeen = sr.entities_seen ?? 0;
+  const dictKeyCount = debugData.dict_key_count ?? 0;
+  const nodeCount = (debugData.dict_keys || []).filter(k => k.startsWith('n:')).length;
+  document.getElementById('debug-stat-success').textContent = status;
+  document.getElementById('debug-stat-calls').textContent = '—';
+  document.getElementById('debug-stat-entities').textContent = `${entitiesSeen} seen`;
+  document.getElementById('debug-stat-progress').textContent = `${nodeCount} nodes / ${dictKeyCount} keys`;
+}
+
+function buildLegacyActivityEntries(debugData) {
+  const entries = [];
+  const sr = debugData.scan_results || {};
+  const now = Date.now() / 1000;
+  if (sr.status) {
+    entries.push({ ts: now, seq: 0, event_type: 'scan_started', resolver: null, entity_key: null });
+  }
+  const dictKeys = debugData.dict_keys || [];
+  let seq = 1;
+  for (const k of dictKeys) {
+    if (k.startsWith('n:')) {
+      entries.push({ ts: now, seq: seq++, event_type: 'node', id: k.slice(2) });
+    }
+  }
+  if (sr.status === 'completed' || sr.status === 'cancelled' || sr.status === 'failed') {
+    entries.push({ ts: now, seq: seq++, event_type: 'scan_finalized', status: sr.status });
+  }
+  return entries;
+}
+
+function startDebugPolling() {
+  stopDebugPolling();
+  if (!debugPanelOpen) return;
+  if (!currentScanId) return;
+  let debugApiUrl = API_BASE_URL;
+  const poll = async () => {
+    if (!currentScanId || !debugPanelOpen) return;
+    try {
+      const apiEl = document.getElementById('debug-stat-api');
+      if (apiEl) apiEl.textContent = debugApiUrl;
+      let events = null;
+
+      // Primary: /debug/{id} (available on all deployed versions)
+      const debugRes = await fetch(debugApiUrl + '/debug/' + currentScanId).catch(() => null);
+      if (debugRes && debugRes.ok) {
+        const debugData = await debugRes.json();
+
+        // New API format: has activity_log, resolver_summary, entity_flow
+        if (debugData.activity_log && debugData.activity_log.length > 0) {
+          events = debugData.activity_log;
+          updateDebugStats(debugData);
+        }
+        // Old API format: has dict_keys, scan_results, dict_key_count
+        else if (debugData.dict_keys || debugData.scan_results) {
+          updateDebugStatsFromLegacy(debugData);
+          events = buildLegacyActivityEntries(debugData);
+        }
+        // New API but no events yet (scan just started)
+        else {
+          updateDebugStats(debugData);
+        }
+      }
+
+      // Enhancement: /scan/{id}/log (newer API, has filtering support)
+      if (!events || events.length === 0) {
+        const logRes = await fetch(debugApiUrl + '/scan/' + currentScanId + '/log').catch(() => null);
+        if (logRes && logRes.ok) {
+          const logData = await logRes.json();
+          if (logData.events && logData.events.length > 0) {
+            events = logData.events;
+          }
+        }
+      }
+
+      if (events && events.length > 0) {
+        debugActivityLog = events;
+        debugResolverRows = buildResolverRowsFromLog(events);
+        updateDebugResolverTable(debugResolverRows);
+        updateDebugActivityFeed(events.map(e => ({ ...e, event_type: e.event_type })));
+      } else if (debugRes && debugRes.ok) {
+        showDebugPlaceholder('Scan running — waiting for resolver data…');
+      } else {
+        showDebugPlaceholder('Waiting for debug data…');
+      }
+    } catch (e) {
+      console.warn('Debug poll failed:', e);
+      showDebugPlaceholder('Waiting for debug data…');
+    }
+  };
+  poll();
+  debugPollTimer = setInterval(poll, 2000);
+}
+
+function stopDebugPolling() {
+  if (debugPollTimer) {
+    clearInterval(debugPollTimer);
+    debugPollTimer = null;
+  }
+}
+
+function resetDebugPanel() {
+  debugActivityLog = [];
+  debugResolverRows = [];
+  updateDebugResolverTable([]);
+  updateDebugActivityFeed([]);
+  document.getElementById('debug-stat-success').textContent = '—';
+  document.getElementById('debug-stat-calls').textContent = '—';
+  document.getElementById('debug-stat-entities').textContent = '—';
+  document.getElementById('debug-stat-progress').textContent = '—';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -907,7 +2099,7 @@ seedInput.addEventListener('keydown', e => {
 });
 
 demoBtn.addEventListener('click', () => {
-  seedInput.value = 'torvalds';
+  seedInput.value = 'drPod';
   seedType.value  = 'username';
   startScan();
 });
@@ -915,7 +2107,11 @@ demoBtn.addEventListener('click', () => {
 function startScan() {
   const seed = seedInput.value.trim();
   const type = seedType.value;
-  if (!seed) return;
+  if (!seed) {
+    seedInput.classList.add('shake');
+    setTimeout(() => seedInput.classList.remove('shake'), 500);
+    return;
+  }
 
   // Reset graph
   nodesMap.clear();
@@ -923,8 +2119,12 @@ function startScan() {
   nodes = [];
   links = [];
   scanCompleted = false;
+  sseRetryCount = 0;
   updateGraph();
   collapseSidebar();
+  resetDebugPanel();
+  resetReport();
+  resetNarrationFeed();
   exportBtn.style.display = 'none';
   scanBtn.disabled  = true;
   demoBtn.disabled  = true;
@@ -944,13 +2144,14 @@ function startScan() {
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ seed: { type, value: seed } }),
   })
-    .then(r => r.json())
+    .then(r => { if (!r.ok) throw new Error(`POST /scan failed: ${r.status}`); return r.json(); })
     .then(data => {
       currentScanId = data.scan_id;
       elScanId.textContent = currentScanId.slice(0, 8) + '…';
       openSSE(currentScanId);
       stopBtn.classList.remove('hidden');
       stopBtn.disabled = false;
+      if (debugPanelOpen) startDebugPolling();
     })
     .catch(err => {
       console.error('POST /scan failed:', err);
@@ -969,12 +2170,18 @@ function stopScan() {
   if (!currentScanId || scanCompleted) return;
   stopBtn.disabled = true;
   fetch(API_BASE_URL + '/scan/' + currentScanId + '/stop', { method: 'POST' })
-    .catch(err => console.error('POST /scan/stop failed:', err));
+    .catch(err => {
+      console.error('POST /scan/stop failed:', err);
+      stopBtn.disabled = false;
+    });
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  SSE
 // ════════════════════════════════════════════════════════════════════
+let sseRetryCount = 0;
+const SSE_MAX_RETRIES = 5;
+
 function openSSE(scanId) {
   if (eventSource) { eventSource.close(); eventSource = null; }
 
@@ -982,6 +2189,7 @@ function openSSE(scanId) {
   eventSource = new EventSource(API_BASE_URL + '/scan/' + scanId + '/stream');
 
   eventSource.onmessage = function(event) {
+    sseRetryCount = 0;  // reset on successful message
     let data;
     try { data = JSON.parse(event.data); }
     catch { return; }
@@ -993,10 +2201,15 @@ function openSSE(scanId) {
     setSseStatus('error');
     eventSource.close();
     eventSource = null;
-    // Reconnect after 3 s if scan not finished
+    sseRetryCount++;
+    if (sseRetryCount > SSE_MAX_RETRIES) {
+      console.error('SSE max retries reached, giving up');
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(2, sseRetryCount - 1), 30000);
     setTimeout(() => {
       if (currentScanId && !scanCompleted) openSSE(currentScanId);
-    }, 3000);
+    }, delay);
   };
 }
 
@@ -1010,8 +2223,14 @@ function handleEvent(data) {
     addNode(data.payload);
   } else if (data.type === 'edge') {
     addEdge(data.payload);
+  } else if (data.type === 'resolver_status') {
+    handleResolverStatus(data.payload);
   } else if (data.type === 'status') {
     handleStatus(data.payload);
+  } else if (data.type === 'report') {
+    handleReportEvent(data.payload);
+  } else if (data.type === 'narration') {
+    handleNarration(data.payload);
   } else if (data.type === 'error') {
     setSseStatus('error');
     scanBtn.disabled = false;
@@ -1028,6 +2247,15 @@ function addNode(payload) {
   if (!payload || !payload.id) return;
   if (nodesMap.has(payload.id)) return;
   const node = { ...payload };
+
+  // Seed position near a connected parent so the node doesn't start at origin
+  const parentId = node.metadata?.parent_key || node.metadata?.source_entity_key;
+  const parent = parentId ? nodesMap.get(parentId) : null;
+  if (parent && parent.x != null && parent.y != null) {
+    node.x = parent.x + (Math.random() - 0.5) * 60;
+    node.y = parent.y + (Math.random() - 0.5) * 60;
+  }
+
   nodesMap.set(node.id, node);
   nodes.push(node);
 
@@ -1037,15 +2265,65 @@ function addNode(payload) {
 
   updateGraph();
   updateStats();
+  flushPendingEdges();
 }
 
 function addEdge(payload) {
   if (!payload || !payload.source || !payload.target) return;
   const key = `${payload.source}-${payload.target}`;
   if (links.some(l => `${l.source?.id||l.source}-${l.target?.id||l.target}` === key)) return;
+
+  if (!nodesMap.has(payload.source) || !nodesMap.has(payload.target)) {
+    if (!pendingEdges.some(p => `${p.source}-${p.target}` === key)) {
+      pendingEdges.push({ ...payload });
+    }
+    return;
+  }
   links.push({ ...payload });
   updateGraph();
   updateStats();
+}
+
+function flushPendingEdges() {
+  let flushed = false;
+  for (let i = pendingEdges.length - 1; i >= 0; i--) {
+    const p = pendingEdges[i];
+    if (nodesMap.has(p.source) && nodesMap.has(p.target)) {
+      const key = `${p.source}-${p.target}`;
+      if (!links.some(l => `${l.source?.id||l.source}-${l.target?.id||l.target}` === key)) {
+        links.push({ ...p });
+        flushed = true;
+      }
+      pendingEdges.splice(i, 1);
+    }
+  }
+  if (flushed) {
+    updateGraph();
+    updateStats();
+  }
+}
+
+function handleResolverStatus(payload) {
+  if (!payload || !debugPanelOpen) return;
+  const p = payload;
+  const row = {
+    resolver: p.resolver_name || p.resolver,
+    entity_key: p.entity_key,
+    status: p.status === 'done' || p.status === 'completed' ? 'done' : p.status === 'failed' ? 'failed' : 'running',
+    duration_ms: p.duration_ms ?? (p.duration != null ? Math.round(p.duration * 1000) : null),
+    nodes_found: p.nodes_found ?? 0,
+    edges_found: p.edges_found ?? 0,
+    error: p.error || null,
+    ts: p.ts ?? Date.now() / 1000,
+    seq: debugResolverRows.length,
+  };
+  const idx = debugResolverRows.findIndex(r => r.resolver === row.resolver && r.entity_key === row.entity_key && r.status === 'running');
+  if (idx >= 0) {
+    debugResolverRows[idx] = row;
+  } else {
+    debugResolverRows.push(row);
+  }
+  updateDebugResolverTable(debugResolverRows);
 }
 
 function handleStatus(payload) {
@@ -1053,6 +2331,10 @@ function handleStatus(payload) {
   if (status === 'completed' || status === 'failed' || status === 'cancelled') {
     scanCompleted = true;
     stopElapsedTimer();
+    stopDebugPolling();
+    if (debugPanelOpen && currentScanId) {
+      fetch(API_BASE_URL + '/debug/' + currentScanId).then(r => r.ok ? r.json() : null).then(d => { if (d) updateDebugStats(d); }).catch(() => {});
+    }
     setSseStatus('idle');
     scanBtn.disabled = false;
     demoBtn.disabled = false;
@@ -1066,10 +2348,170 @@ function handleStatus(payload) {
       exportBtn.style.display = '';
       exportBtn.href = API_BASE_URL + '/scan/' + currentScanId + '/graph/download';
       exportBtn.download = `phantom-${currentScanId.slice(0, 8)}.json`;
+      // Show generating indicator only for completed scans (not cancelled)
+      if (!currentReport && status === 'completed') {
+        reportGeneratingEl.style.display = '';
+        // REST fallback: try fetching report after a delay
+        const fallbackScanId = currentScanId;
+        setTimeout(() => {
+          if (currentReport) return;
+          fetch(API_BASE_URL + '/scan/' + fallbackScanId + '/report')
+            .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+            .then(report => {
+              if (!currentReport && report) {
+                handleReportEvent({ report });
+              }
+            })
+            .catch(() => {});
+        }, 5000);
+      }
+      // Hide narration feed after a short delay
+      setTimeout(() => resetNarrationFeed(), 4000);
       // Auto-fit graph after simulation settles
       setTimeout(() => zoomToFit(60), 1800);
     }
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  REPORT
+// ════════════════════════════════════════════════════════════════════
+let currentReport = null;
+
+const reportBtn        = document.getElementById('report-btn');
+const reportOverlay    = document.getElementById('report-overlay');
+const reportModalClose = document.getElementById('report-modal-close');
+const reportModalBody  = document.getElementById('report-modal-body');
+const reportCopyBtn    = document.getElementById('report-copy-btn');
+const reportGeneratingEl = document.getElementById('report-generating');
+
+reportBtn.addEventListener('click', openReportModal);
+reportModalClose.addEventListener('click', closeReportModal);
+reportOverlay.addEventListener('click', e => { if (e.target === reportOverlay) closeReportModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeReportModal(); });
+
+reportCopyBtn.addEventListener('click', () => {
+  if (!currentReport) return;
+  navigator.clipboard.writeText(currentReport).then(() => {
+    reportCopyBtn.textContent = 'COPIED!';
+    setTimeout(() => { reportCopyBtn.textContent = 'COPY MARKDOWN'; }, 1800);
+  }).catch(() => {});
+});
+
+function handleReportEvent(payload) {
+  const report = payload?.report;
+  if (!report) return;
+  currentReport = report;
+  reportGeneratingEl.style.display = 'none';
+  reportBtn.style.display = '';
+}
+
+function openReportModal() {
+  if (!currentReport) return;
+  reportModalBody.innerHTML = renderReportMarkdown(currentReport);
+  reportOverlay.classList.add('open');
+}
+
+function closeReportModal() {
+  reportOverlay.classList.remove('open');
+}
+
+function renderReportMarkdown(md) {
+  // Minimal markdown renderer for the report format
+  const lines = md.split('\n');
+  let html = '';
+  let listTag = null; // 'ul' or 'ol'
+
+  for (const raw of lines) {
+    const line = raw;
+
+    if (line.startsWith('# ')) {
+      if (listTag) { html += `</${listTag}>`; listTag = null; }
+      html += `<h1>${escHtml(line.slice(2))}</h1>`;
+    } else if (line.startsWith('## ')) {
+      if (listTag) { html += `</${listTag}>`; listTag = null; }
+      html += `<h2>${escHtml(line.slice(3))}</h2>`;
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      if (listTag === 'ol') { html += '</ol>'; listTag = null; }
+      if (!listTag) { html += '<ul>'; listTag = 'ul'; }
+      html += `<li>${renderInline(line.slice(2))}</li>`;
+    } else if (/^\d+\.\s/.test(line)) {
+      if (listTag === 'ul') { html += '</ul>'; listTag = null; }
+      if (!listTag) { html += '<ol>'; listTag = 'ol'; }
+      html += `<li>${renderInline(line.replace(/^\d+\.\s/, ''))}</li>`;
+    } else {
+      if (listTag) { html += `</${listTag}>`; listTag = null; }
+      if (line.trim() === '') {
+        html += '';
+      } else {
+        html += `<p>${renderInline(line)}</p>`;
+      }
+    }
+  }
+  if (listTag) html += `</${listTag}>`;
+  return html;
+}
+
+function renderInline(text) {
+  // Bold, code, risk level colouring
+  let out = escHtml(text);
+  // **bold**
+  out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // `code`
+  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Risk level keywords
+  out = out.replace(/\bCRITICAL\b/g, '<span class="report-risk-critical">CRITICAL</span>');
+  out = out.replace(/\bHIGH\b/g, '<span class="report-risk-high">HIGH</span>');
+  out = out.replace(/\bMEDIUM\b/g, '<span class="report-risk-medium">MEDIUM</span>');
+  out = out.replace(/\bLOW\b/g, '<span class="report-risk-low">LOW</span>');
+  out = out.replace(/\bNONE\b/g, '<span class="report-risk-none">NONE</span>');
+  return out;
+}
+
+function resetReport() {
+  currentReport = null;
+  reportBtn.style.display = 'none';
+  reportGeneratingEl.style.display = 'none';
+  reportModalBody.innerHTML = '';
+  reportOverlay.classList.remove('open');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  NARRATION FEED
+// ════════════════════════════════════════════════════════════════════
+const narrationFeedEl = document.getElementById('narration-feed');
+
+const NARRATION_ICONS = {
+  start:      '◈',
+  resolver:   '⟳',
+  result:     '✓',
+  warning:    '⚠',
+  analysis:   '◆',
+  enrichment: '⬡',
+  report:     '▣',
+  complete:   '✦',
+  info:       '·',
+};
+
+function handleNarration(payload) {
+  if (!payload || !payload.message) return;
+  const category = payload.category || 'info';
+  const icon = NARRATION_ICONS[category] || '·';
+
+  narrationFeedEl.classList.remove('hidden');
+
+  const msg = document.createElement('span');
+  msg.className = `narration-msg cat-${category}`;
+  msg.textContent = `${icon}  ${payload.message}`;
+
+  // Replace any existing message (single-line feed shows latest only)
+  narrationFeedEl.innerHTML = '';
+  narrationFeedEl.appendChild(msg);
+}
+
+function resetNarrationFeed() {
+  narrationFeedEl.innerHTML = '';
+  narrationFeedEl.classList.add('hidden');
 }
 </script>
 </body>

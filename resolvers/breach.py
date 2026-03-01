@@ -13,6 +13,7 @@ from leakcheck import LeakCheckAPI_Public, LeakCheckAPI_v2
 from app import app, image, osint_secret
 from graph import EDGES_BATCH_PREFIX, NODE_PREFIX
 from models import EntityType
+from scan_log import log_scan_event
 from stream import write_stream_event
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ SOURCE = "breach_resolver"
 
 
 def _entity_key(etype: str, value: str) -> str:
-    v = value.strip().lower()
+    v = (str(value) if not isinstance(value, str) else value).strip().lower()
     return f"{etype}:{v}"
 
 
@@ -30,7 +31,7 @@ def _backoff(attempt: int) -> None:
 
 
 def _infer_entity_type(value: str) -> str:
-    v = value.strip().lower()
+    v = (str(value) if not isinstance(value, str) else value).strip().lower()
     if "@" in v:
         return EntityType.EMAIL.value
     return EntityType.USERNAME.value
@@ -48,7 +49,6 @@ def resolve_breach(
     """Search breach databases for an email or username."""
     if not scan_id:
         return
-    q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
@@ -96,10 +96,11 @@ def resolve_breach(
     if dehashed_key:
         try:
             query_field = "email" if is_email else "username"
+            escaped_value = value.replace('"', '\\"')
             r = httpx.post(
                 "https://api.dehashed.com/v2/search",
                 json={
-                    "query": f"{query_field}:{value}",
+                    "query": f'{query_field}:"{escaped_value}"',
                     "page": 1,
                     "size": 100,
                     "de_dupe": True,
@@ -113,6 +114,7 @@ def resolve_breach(
             if r.status_code == 200:
                 ddata = r.json()
                 entries = ddata.get("entries") or []
+                logger.debug("Dehashed balance: %s", ddata.get("balance"))
                 metadata["dehashed_total"] = ddata.get("total", 0)
                 metadata["dehashed_balance"] = ddata.get("balance")
                 metadata["dehashed_entries"] = [
@@ -120,8 +122,9 @@ def resolve_breach(
                         "email": (e.get("email") or [None])[0],
                         "username": (e.get("username") or [None])[0],
                         "database_name": e.get("database_name"),
-                        "hashed_password": bool(e.get("hashed_password")),
+                        "hashed_password": (e.get("hashed_password") or [None])[0],
                         "ip_address": (e.get("ip_address") or [None])[0],
+                        "phone": (e.get("phone") or [None])[0],
                         "name": (e.get("name") or [None])[0],
                     }
                     for e in entries[:20]
@@ -130,10 +133,49 @@ def resolve_breach(
                     _process_result_entry(entry)
             elif r.status_code == 401:
                 logger.warning("Dehashed auth failed (check DEHASHED_KEY)")
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_breach",
+                    entity_key=node_id,
+                    error="Dehashed auth failed (401)",
+                    service="Dehashed",
+                    response_preview=(r.text or "")[:500],
+                )
             elif r.status_code == 429:
                 logger.warning("Dehashed rate limited for %s", value)
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_breach",
+                    entity_key=node_id,
+                    error="Dehashed rate limited (429)",
+                    service="Dehashed",
+                    response_preview=(r.text or "")[:500],
+                )
+            else:
+                response_preview = (r.text or "")[:500]
+                log_scan_event(
+                    scan_id,
+                    "resolver_failed",
+                    resolver="resolve_breach",
+                    entity_key=node_id,
+                    error=f"Dehashed status {r.status_code}",
+                    service="Dehashed",
+                    response_preview=response_preview,
+                )
         except Exception as e:
+            response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
             logger.warning("Dehashed failed for %s: %s", value, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_breach",
+                entity_key=node_id,
+                error=str(e),
+                service="Dehashed",
+                response_preview=response_preview,
+            )
 
     # 2. LeakCheck API — free Public API when no key; Pro API v2 when LEAKCHECK_APIKEY set
     leakcheck_key = os.environ.get("LEAKCHECK_APIKEY") or os.environ.get("LEAKCHECK_KEY", "")
@@ -152,6 +194,7 @@ def resolve_breach(
                 ) or []
                 metadata["leakcheck_found"] = len(records)
                 seen_sources: dict[str, Any] = {}
+                leakcheck_entries: list[dict[str, Any]] = []
                 for rec in records:
                     if not isinstance(rec, dict):
                         continue
@@ -161,9 +204,23 @@ def resolve_breach(
                         elif isinstance(src, str):
                             seen_sources.setdefault(src, None)
                     _process_result_entry(rec)
+                    raw_hash = rec.get("hashed") or None
+                    if raw_hash or rec.get("email") or rec.get("username"):
+                        leakcheck_entries.append({
+                            "email": rec.get("email") or None,
+                            "username": rec.get("username") or None,
+                            "hashed_password": raw_hash,
+                            "sources": [
+                                s.get("name") if isinstance(s, dict) else s
+                                for s in (rec.get("sources") or [])
+                                if s
+                            ],
+                        })
                 metadata["leakcheck_sources"] = [
                     {"name": k, "date": v} for k, v in list(seen_sources.items())[:20]
                 ]
+                if leakcheck_entries:
+                    metadata["leakcheck_entries"] = leakcheck_entries[:20]
             else:
                 api = LeakCheckAPI_Public()
                 # Public lookup() returns full response: {success, found, sources: [strings]}
@@ -182,12 +239,29 @@ def resolve_breach(
                 _backoff(attempt)
                 continue
             logger.warning("LeakCheck API error for %s: %s", value, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_breach",
+                entity_key=node_id,
+                error=str(e),
+                service="LeakCheck",
+            )
             break
         except Exception as e:
             logger.warning("LeakCheck attempt %s failed for %s: %s", attempt + 1, value, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_breach",
+                entity_key=node_id,
+                error=str(e),
+                service="LeakCheck",
+            )
             _backoff(attempt)
 
     # 3. BreachDirectory via RapidAPI
+    r = None
     bd_key = os.environ.get("BREACHDIRECTORY_KEY", "")
     if bd_key:
         try:
@@ -201,7 +275,17 @@ def resolve_breach(
                 timeout=15,
             )
         except Exception as e:
+            response_preview = (getattr(getattr(e, "response", None), "text", None) or "")[:500]
             logger.warning("BreachDirectory failed for %s: %s", value, e)
+            log_scan_event(
+                scan_id,
+                "resolver_failed",
+                resolver="resolve_breach",
+                entity_key=node_id,
+                error=str(e),
+                service="BreachDirectory",
+                response_preview=response_preview,
+            )
             r = None
     else:
         r = None
@@ -221,6 +305,17 @@ def resolve_breach(
             em = (res.get("email") or "").strip().lower()
             if em and "@" in em and em != value.lower():
                 discovered_emails.add(em)
+    elif r is not None:
+        logger.warning("BreachDirectory non-200 for %s: %s", value, r.status_code)
+        log_scan_event(
+            scan_id,
+            "resolver_failed",
+            resolver="resolve_breach",
+            entity_key=node_id,
+            error=f"BreachDirectory status {r.status_code}",
+            service="BreachDirectory",
+            response_preview=(r.text or "")[:500],
+        )
 
     # Push discovered entities
     for email in discovered_emails:
@@ -272,5 +367,3 @@ def resolve_breach(
     for edge in edges_batch:
         write_stream_event(scan_id, "edge", edge)
 
-    for item in to_push:
-        q.put(item)

@@ -5,12 +5,15 @@ via @modal.enter(), then exposes three @modal.method() endpoints.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 
 import modal
 
 from app import app
+
+logger = logging.getLogger(__name__)
 
 # Project root – needed so gpu_image can mount the same local source tree.
 _local_dir = Path(__file__).resolve().parent.parent
@@ -33,6 +36,10 @@ gpu_image = (
         "beautifulsoup4~=4.12",
         "dnspython~=2.7",
         "lxml~=5.3",
+        "emailrep",
+        "leakcheck~=2.0.0",
+        "disposable-email-domains",
+        "anthropic~=0.49",
     )
     .env({"PYTHONPATH": "/root/osint_recon"})
     .add_local_dir(_local_dir, remote_path="/root/osint_recon")
@@ -82,23 +89,36 @@ class EntityExtractor:
     @modal.method()
     def extract_entities(self, text: str, source_url: str = "") -> dict:
         content = f"Source: {source_url}\n\n{text}" if source_url else text
+        logger.info("extract_entities input (first 200 chars): %s", (content or "")[:200])
         messages = [
             {
                 "role": "system",
                 "content": (
                     "Extract entities from this text. Return JSON with keys: "
                     "names, usernames, emails, domains, locations, employers, projects. "
-                    "Each value is a list of strings. Return only the JSON object."
+                    "Each value is a list of strings. Return only the JSON object.\n\n"
+                    "Strict rules:\n"
+                    "- Emails: Must be in the form user@domain.tld. Do not output IP addresses as emails. "
+                    "Do not output strings that do not contain @. One email per list item; do not put entire SPF/DNS records or long strings as a single email.\n"
+                    "- Domains: Must be valid hostnames with a real TLD (e.g. example.com). Do not output bare words (e.g. mx, include, google-site-verification). "
+                    "Do not output IP addresses. Do not output strings containing spaces. Do not output the entire input text as one domain.\n"
+                    "- Do not extract the entire input text as a single value for any key. Prefer short, atomic values (one email, one domain, one username per list element)."
                 ),
             },
             {"role": "user", "content": content},
         ]
         output = self._run_inference(messages)
+        logger.info("extract_entities raw output (first 500 chars): %s", (output or "")[:500])
         try:
             start = output.find("{")
             end = output.rfind("}") + 1
             parsed = json.loads(output[start:end]) if start >= 0 and end > start else {}
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(
+                "extract_entities parse error: %s; raw output: %s",
+                e,
+                (output or "")[:500],
+            )
             parsed = {}
         return {
             k: parsed.get(k, []) if isinstance(parsed.get(k), list) else []

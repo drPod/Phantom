@@ -1,4 +1,4 @@
-"""FastAPI endpoints: POST /scan, GET /scan/{id}/status, GET /scan/{id}/graph, GET /scan/{id}/stream."""
+"""FastAPI endpoints: POST /scan, GET /scan/{id}/status, GET /scan/{id}/graph, GET /scan/{id}/stream, GET /scan/{id}/log, GET /debug/{id}."""
 
 import asyncio
 import json
@@ -9,7 +9,9 @@ from typing import Any
 import modal
 
 from app import app, image, osint_secret
+from graph import build_from_dict
 from models import GraphResponse, ScanConfig, ScanRequest, ScanResponse, ScanStatus, StatusResponse
+from scan_log import load_activity_log
 
 # Persistent Dict for scan results (same name as in orchestrator)
 SCAN_RESULTS_DICT = "osint-scan-results"
@@ -17,6 +19,7 @@ _STREAM_PREFIX = "osint-stream-"
 
 
 @app.function(image=image, secrets=[osint_secret])
+@modal.concurrent(max_inputs=100)
 @modal.asgi_app()
 def fastapi_app() -> Any:
     from fastapi import FastAPI, HTTPException
@@ -30,7 +33,6 @@ def fastapi_app() -> Any:
     web_app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -46,7 +48,7 @@ def fastapi_app() -> Any:
             "status": ScanStatus.RUNNING.value,
             "graph": None,
             "error": None,
-            "entities_seen": 0,
+            "entities_seen": 1,
             "depth_reached": 0,
         }
         run_scan.spawn(scan_id, seed_entity, config)
@@ -63,6 +65,7 @@ def fastapi_app() -> Any:
             entities_seen=row.get("entities_seen", 0),
             depth_reached=row.get("depth_reached", 0),
             error=row.get("error"),
+            report=row.get("report"),
         )
 
     @web_app.post("/scan/{scan_id}/stop")
@@ -82,12 +85,16 @@ def fastapi_app() -> Any:
         if scan_id not in scan_results:
             raise HTTPException(status_code=404, detail="Scan not found")
         row = scan_results[scan_id]
-        if row["status"] == ScanStatus.RUNNING.value:
-            raise HTTPException(status_code=202, detail="Scan still running")
         if row["status"] == ScanStatus.FAILED.value:
             raise HTTPException(status_code=503, detail=row.get("error") or "Scan failed")
-        # CANCELLED and COMPLETED both return the graph (possibly partial)
         graph = row.get("graph")
+        if not graph and row["status"] == ScanStatus.RUNNING.value:
+            try:
+                d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=False)
+                snapshot = {k: d[k] for k in d.keys()}
+                graph = build_from_dict(snapshot)
+            except Exception:
+                graph = None
         if not graph:
             return GraphResponse(nodes=[], edges=[])
         return GraphResponse(nodes=graph.get("nodes", []), edges=graph.get("edges", []))
@@ -101,15 +108,13 @@ def fastapi_app() -> Any:
         if scan_id not in scan_results:
             raise HTTPException(status_code=404, detail="Scan not found")
         row = scan_results[scan_id]
-        if row["status"] == ScanStatus.RUNNING.value:
-            raise HTTPException(status_code=202, detail="Scan still running")
-        # CANCELLED and COMPLETED both allow download
         graph = row.get("graph") or {}
         content = _json.dumps(
             {
                 "scan_id": scan_id,
                 "nodes": graph.get("nodes", []),
                 "edges": graph.get("edges", []),
+                "report": row.get("report"),
             },
             indent=2,
         )
@@ -118,6 +123,25 @@ def fastapi_app() -> Any:
             content=content,
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @web_app.get("/scan/{scan_id}/report")
+    def get_scan_report(scan_id: str):
+        """Return the final intelligence report for a completed scan."""
+        from fastapi.responses import Response
+
+        if scan_id not in scan_results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        row = scan_results[scan_id]
+        report = row.get("report")
+        if report is None:
+            status = row.get("status", "")
+            if status == ScanStatus.RUNNING.value:
+                raise HTTPException(status_code=202, detail="Scan still running; report not yet available.")
+            raise HTTPException(status_code=404, detail="Report not available for this scan.")
+        return Response(
+            content=report,
+            media_type="text/plain; charset=utf-8",
         )
 
     @web_app.get("/scan/{scan_id}/stream")
@@ -211,25 +235,113 @@ def fastapi_app() -> Any:
 
     @web_app.get("/debug/{scan_id}")
     def debug_scan(scan_id: str):
-        """Return raw dict contents for debugging a stuck scan."""
-        out = {}
-        try:
-            sr = modal.Dict.from_name("osint-scan-results", create_if_missing=True)
-            out["scan_results"] = dict(sr.get(scan_id, {}))
-        except Exception as e:
-            out["scan_results_error"] = str(e)
-        try:
-            d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
-            keys = list(d.keys())
-            out["dict_keys"] = keys
-            out["dict_key_count"] = len(keys)
-        except Exception as e:
-            out["dict_error"] = str(e)
-        try:
-            q = modal.Queue.from_name(f"osint-q-{scan_id}", create_if_missing=True)
-            out["queue_info"] = "ok"
-        except Exception as e:
-            out["queue_error"] = str(e)
-        return out
+        """Enhanced debug: activity log, resolver summary, entity flow, queue depth, timeline."""
+        if scan_id not in scan_results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+
+        activity_log = load_activity_log(scan_id)
+
+        # Resolver summary: aggregate resolver_spawned, resolver_completed, resolver_failed
+        resolver_stats: dict[str, dict[str, Any]] = {}
+        for evt in activity_log:
+            resolver = evt.get("resolver")
+            if resolver is None:
+                continue
+            if resolver not in resolver_stats:
+                resolver_stats[resolver] = {"calls": 0, "successes": 0, "failures": 0, "durations": []}
+            if evt.get("event_type") == "resolver_spawned":
+                resolver_stats[resolver]["calls"] += 1
+            elif evt.get("event_type") == "resolver_completed":
+                resolver_stats[resolver]["successes"] += 1
+                dur = evt.get("duration")
+                if dur is not None:
+                    resolver_stats[resolver]["durations"].append(dur * 1000)
+            elif evt.get("event_type") == "resolver_failed":
+                resolver_stats[resolver]["failures"] += 1
+
+        resolver_summary = [
+            {
+                "resolver": r,
+                "calls": s["calls"],
+                "successes": s["successes"],
+                "failures": s["failures"],
+                "avg_duration_ms": round(sum(s["durations"]) / len(s["durations"]), 2) if s["durations"] else 0.0,
+            }
+            for r, s in sorted(resolver_stats.items())
+        ]
+
+        # Entity flow: count entity_skipped by reason, processed, discovered
+        skipped: dict[str, int] = {"dedup": 0, "depth_limit": 0, "max_entities": 0, "blocklist": 0}
+        for evt in activity_log:
+            if evt.get("event_type") == "entity_skipped":
+                reason = evt.get("reason", "")
+                if reason in skipped:
+                    skipped[reason] += 1
+
+        processed = sum(1 for e in activity_log if e.get("event_type") == "resolver_spawned")
+        row = scan_results.get(scan_id) or {}
+        discovered = row.get("entities_seen", 0)
+
+        status = row.get("status", "unknown")
+        if status in (ScanStatus.COMPLETED.value, ScanStatus.FAILED.value, ScanStatus.CANCELLED.value):
+            estimated_remaining = "Scan completed"
+        else:
+            estimated_remaining = "Agent loop running"
+
+        # Timeline for Gantt: ts, event_type, resolver?, duration?
+        timeline = [
+            {
+                "ts": e.get("ts"),
+                "event_type": e.get("event_type"),
+                "resolver": e.get("resolver"),
+                "duration": e.get("duration"),
+                "node_id": e.get("node_id"),
+            }
+            for e in activity_log
+        ]
+
+        return {
+            "scan_id": scan_id,
+            "status": status,
+            "activity_log": activity_log,
+            "resolver_summary": resolver_summary,
+            "entity_flow": {
+                "discovered": discovered,
+                "skipped": skipped,
+                "processed": processed,
+            },
+            "estimated_remaining": estimated_remaining,
+            "timeline": timeline,
+        }
+
+    @web_app.get("/scan/{scan_id}/log")
+    def get_scan_log(
+        scan_id: str,
+        resolver: str | None = None,
+        status: str | None = None,
+        event_type: str | None = None,
+    ):
+        """Return activity log as JSON array. Optional filters: ?resolver=... &status=... &event_type=..."""
+        if scan_id not in scan_results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+
+        events = load_activity_log(scan_id)
+
+        if resolver:
+            events = [e for e in events if e.get("resolver") == resolver]
+        if status:
+            # status=completed -> resolver_completed, gpu_extraction_completed, scan_finalized (completed)
+            # status=failed -> resolver_failed, gpu_extraction_failed
+            status_lower = status.lower()
+            if status_lower == "completed":
+                events = [e for e in events if e.get("event_type") in ("resolver_completed", "gpu_extraction_completed")]
+            elif status_lower == "failed":
+                events = [e for e in events if e.get("event_type") in ("resolver_failed", "gpu_extraction_failed")]
+            elif status_lower in ("running", "cancelled"):
+                events = [e for e in events if e.get("event_type") == "scan_finalized" and e.get("status") == status_lower]
+        if event_type:
+            events = [e for e in events if e.get("event_type") == event_type]
+
+        return {"scan_id": scan_id, "events": events}
 
     return web_app
