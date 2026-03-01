@@ -37,6 +37,8 @@ from scan_log import log_scan_event
 from stream import write_stream_event
 from telemetry.exporter import TELEMETRY_DICT_NAME, TelemetryCollector
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Validation helpers (shared with GPU post-processing)
 # ---------------------------------------------------------------------------
@@ -743,8 +745,26 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
                     _cap = _uv[0].upper() + _uv[1:]
                     if _cap not in _variants and _cap != _uv:
                         _variants.append(_cap)
+                # punctuation-inject variants: dr._pod, dr-.pod, _dr.pod etc.
+                # Split on existing separator chars OR camelCase boundary
+                _parts = re.split(r'[._-]', _uv_lower)
+                if len(_parts) < 2:
+                    # Try camelCase split (drPod -> ['dr', 'Pod'])
+                    _camel_parts = re.split(r'(?<=[a-z])(?=[A-Z])', _uv)
+                    if len(_camel_parts) == 2:
+                        _parts = [p.lower() for p in _camel_parts]
+                if len(_parts) == 2:
+                    _p1, _p2 = _parts
+                    _punct_variants = [
+                        f"{_p1}._{_p2}", f"{_p1}_.{_p2}",
+                        f"_{_p1}.{_p2}", f"{_p1}.{_p2}",
+                        f"{_p1}_{_p2}", f"{_p1}-{_p2}",
+                    ]
+                    for _pv in _punct_variants:
+                        if _pv and re.match(r'^[a-z0-9._-]{3,30}$', _pv) and _pv not in _variants and _pv != _uv_lower:
+                            _variants.append(_pv)
                 # deduplicate and limit (don't spam too many)
-                _variants = [v for v in _variants if v != _uv and v != _uv_lower][:5]
+                _variants = [v for v in _variants if v != _uv and v != _uv_lower][:8]
                 for _var in _variants:
                     _blast_resolvers.append(("enumerate_username", _var, "username", 1))
 

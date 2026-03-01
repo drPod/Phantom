@@ -497,4 +497,12 @@ def fastapi_app() -> Any:
 
         return {"scan_id": scan_id, "events": events}
 
+    # Serve frontend static files (must be last so API routes take precedence)
+    from pathlib import Path
+    from fastapi.staticfiles import StaticFiles
+
+    frontend_dir = Path("/root/osint_recon/frontend")
+    if frontend_dir.exists():
+        web_app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="static")
+
     return web_app

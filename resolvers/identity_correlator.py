@@ -15,6 +15,7 @@ import itertools
 import logging
 import re
 import time
+import traceback
 import uuid
 from typing import Any
 
@@ -176,7 +177,7 @@ def correlate_identities(snapshot: dict[str, Any], scan_id: str) -> dict[str, An
         # Warm up the GPU container once before the batch
         try:
             warmup = extractor.score_identity_match.spawn({"warmup": True}, {"warmup": True})
-            warmup.get(timeout=120)
+            warmup.get(timeout=10)
         except (TimeoutError, modal.exception.FunctionTimeoutError):
             log_scan_event(scan_id, "identity_correlation_warmup_timeout")
             return snapshot
@@ -331,6 +332,23 @@ def correlate_identities_tool(
 
 
 def _correlate_identities_tool_impl(scan_id: str) -> None:
+    logger.info("identity_correlator: starting impl for scan=%s", scan_id)
+    try:
+        _correlate_identities_tool_impl_inner(scan_id)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error(
+            "identity_correlator: unhandled exception for scan=%s\n%s",
+            scan_id, tb,
+        )
+        try:
+            log_scan_event(scan_id, "identity_correlator_unhandled_error",
+                           error=str(exc), traceback=tb[:2000])
+        except Exception:
+            pass
+
+
+def _correlate_identities_tool_impl_inner(scan_id: str) -> None:
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
 
     # Guard: ensure we have enough nodes before attempting correlation

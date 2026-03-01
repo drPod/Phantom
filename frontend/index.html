@@ -150,6 +150,37 @@
       color: var(--text);
     }
 
+    /* ── scan summary ──────────────────────────────────────────── */
+    #scan-summary {
+      flex: 0 0 auto;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      padding: 8px 18px;
+      font-size: 11px;
+      color: var(--text2);
+      line-height: 1.6;
+      letter-spacing: 0.3px;
+      animation: banner-slide-in 0.3s ease-out;
+      cursor: pointer;
+      user-select: text;
+    }
+    #scan-summary.hidden { display: none; }
+    #scan-summary.collapsed .summary-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #scan-summary .summary-text {
+      margin: 0;
+    }
+    #scan-summary .summary-toggle {
+      font-size: 9px;
+      color: var(--text2);
+      opacity: 0.5;
+      margin-left: 6px;
+      letter-spacing: 1px;
+    }
+
     /* ── input row ──────────────────────────────────────────────── */
     #input-row {
       flex: 0 0 auto;
@@ -1582,6 +1613,9 @@
     <span class="banner-stats"></span>
   </div>
 
+  <!-- ── scan summary (executive summary from report) ────────── -->
+  <div id="scan-summary" class="hidden"></div>
+
   <!-- ── main ─────────────────────────────────────────────────────── -->
   <div id="main">
     <div id="graph-wrap">
@@ -1732,6 +1766,8 @@ const API_BASE_URL = (() => {
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get('api');
   if (fromUrl && fromUrl.startsWith('http')) return fromUrl.replace(/\/$/, '');
+  // When served from same origin (e.g. Modal), use current origin
+  if (window.location.protocol === 'https:' && window.location.hostname.includes('modal.run')) return window.location.origin;
   return PROD_API;
 })();
 
@@ -3697,6 +3733,7 @@ function handleStatus(payload) {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 
     showCompletionBanner(status, payload);
+    showScanSummary();
 
     if (status === 'completed' || status === 'cancelled') {
       exportWrap.style.display = nodesMap.size > 0 ? '' : 'none';
@@ -3807,6 +3844,7 @@ function handleReportEvent(payload) {
   currentReport = report;
   reportGeneratingEl.style.display = 'none';
   reportBtn.style.display = '';
+  showScanSummary();
 }
 
 function openReportModal() {
@@ -3877,7 +3915,53 @@ function resetReport() {
   reportGeneratingEl.style.display = 'none';
   reportModalBody.innerHTML = '';
   reportOverlay.classList.remove('open');
+  hideScanSummary();
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  SCAN SUMMARY (executive summary from report)
+// ════════════════════════════════════════════════════════════════════
+const scanSummaryEl = document.getElementById('scan-summary');
+
+function extractExecutiveSummary(md) {
+  if (!md) return null;
+  const start = md.indexOf('## EXECUTIVE SUMMARY');
+  if (start === -1) return null;
+  const afterHeading = md.indexOf('\n', start);
+  if (afterHeading === -1) return null;
+  const nextSection = md.indexOf('\n## ', afterHeading);
+  const body = nextSection === -1
+    ? md.slice(afterHeading)
+    : md.slice(afterHeading, nextSection);
+  const trimmed = body.trim();
+  return trimmed || null;
+}
+
+function showScanSummary() {
+  if (!currentReport || !scanCompleted) return;
+  const summary = extractExecutiveSummary(currentReport);
+  if (!summary) return;
+
+  const rendered = summary.split('\n').filter(l => l.trim())
+    .map(l => renderInline(l)).join(' ');
+
+  scanSummaryEl.innerHTML =
+    `<span class="summary-text">${rendered}</span>` +
+    `<span class="summary-toggle">[click to collapse]</span>`;
+  scanSummaryEl.classList.remove('hidden', 'collapsed');
+}
+
+function hideScanSummary() {
+  scanSummaryEl.innerHTML = '';
+  scanSummaryEl.classList.add('hidden');
+  scanSummaryEl.classList.remove('collapsed');
+}
+
+scanSummaryEl.addEventListener('click', () => {
+  const collapsed = scanSummaryEl.classList.toggle('collapsed');
+  const toggle = scanSummaryEl.querySelector('.summary-toggle');
+  if (toggle) toggle.textContent = collapsed ? '[click to expand]' : '[click to collapse]';
+});
 
 // ════════════════════════════════════════════════════════════════════
 //  NARRATION FEED

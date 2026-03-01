@@ -1,10 +1,12 @@
 """Mass username enumeration using WhatsMyName dataset (~600 sites) via async httpx."""
 
 import asyncio
+import difflib
 import json
 import logging
 import re
 import time
+import traceback
 import uuid
 from typing import Any
 from urllib.parse import urlparse
@@ -488,14 +490,14 @@ def _distill_profiles(raw_profiles: list[dict], username: str, real_name: str | 
 def _is_name_mismatch(display_name: str, real_name: str) -> bool:
     """Deterministic check: is display_name clearly a different real person than real_name?
 
-    Returns True only when:
-    1. display_name looks like a real full name (>= 2 alpha words, each >= 3 chars)
-    2. display_name shares ZERO token overlap with real_name
+    Returns True when display_name looks like a real person name AND shares zero
+    token overlap with real_name.
 
-    This catches "Andrew Harvey" / "Dillon Radford" / "Dr. Anthony Podloski" when
-    real_name is "Darsh Poddar" — without requiring an LLM call.
-
-    Does NOT fire on handles like "Dr_Pod", "drpod", "Dr Po D" (< 2 alpha words).
+    Rules:
+    - Full name (>= 2 alpha words, each >= 3 chars): always checked
+    - Single word (>= 5 chars, starts with uppercase): checked as a given name
+      e.g. "Desmond" != "Darsh Poddar" -> mismatch
+    - Does NOT fire on handles like "Dr_Pod", "drpod", or short fragments (<= 4 chars)
     """
     if not display_name or not real_name:
         return False
@@ -504,15 +506,20 @@ def _is_name_mismatch(display_name: str, real_name: str) -> bool:
         return False
     # Extract alpha-only words >= 3 chars from display_name
     display_words = [w for w in re.findall(r"[a-zA-Z]+", display_name) if len(w) >= 3]
-    # Must look like a real full name (>= 2 words)
-    if len(display_words) < 2:
+    if not display_words:
         return False
     display_tokens = {w.lower() for w in display_words}
     # If any token overlaps with real_name -> not a mismatch
     if real_tokens & display_tokens:
         return False
-    # No overlap -> flag as mismatch
-    return True
+    # Full name (2+ words) with no real_name overlap -> mismatch
+    if len(display_words) >= 2:
+        return True
+    # Single word: must look like a proper given name (>= 5 chars, starts uppercase)
+    single = display_words[0]
+    if len(single) >= 5 and display_name.strip()[0].isupper():
+        return True
+    return False
 
 
 async def _run_all_checks(username: str, sites: list[dict], deadline: float, scan_id: str = "", real_name: str | None = None, seed_email: str | None = None) -> list[dict]:
@@ -649,6 +656,28 @@ def enumerate_username(
     username = (entity_value or "").strip()
     if not username:
         return
+    try:
+        _enumerate_username_inner(entity_value, entity_type, depth, source_entity_key, scan_id, d, wall_start)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error("enumerate_username: unhandled exception for %s (scan=%s)\n%s", username, scan_id, tb)
+        try:
+            log_scan_event(scan_id, "enumerate_username_unhandled_error",
+                           username=username, error=str(exc), traceback=tb[:2000])
+        except Exception:
+            pass
+
+
+def _enumerate_username_inner(
+    entity_value: str,
+    entity_type: str,
+    depth: int,
+    source_entity_key: str,
+    scan_id: str,
+    d: Any,
+    wall_start: float,
+) -> None:
+    username = (entity_value or "").strip()
 
     # Read disambiguation context stored by orchestrator so the distiller
     # can correctly flag identity_mismatch for profiles of other people.
@@ -684,6 +713,23 @@ def enumerate_username(
     # -----------------------------------------------------------------------
     # These run synchronously here so we have access to the scan Dict (d),
     # real_name, seed_email, and can make additional HTTP calls if needed.
+
+    # --- Username similarity scoring (difflib) ---
+    # For each confirmed profile, extract the URL handle and score similarity
+    # against the seed username. High ratio (>0.80) = strong same-person signal.
+    _username_lower = username.lower()
+    for _profile in hits:
+        _profile_url = (_profile.get("uri_pretty") or _profile.get("url") or "").rstrip("/")
+        # Extract the last path segment as the handle
+        _handle = _profile_url.split("/")[-1].split("?")[0].split("@")[-1].strip().lower()
+        if _handle and _handle != _username_lower:
+            _sim = difflib.SequenceMatcher(None, _username_lower, _handle).ratio()
+            _profile["username_similarity"] = round(_sim, 3)
+            if _sim > 0.80:
+                _profile["username_similarity_strong"] = True
+        elif _handle == _username_lower:
+            _profile["username_similarity"] = 1.0
+            _profile["username_similarity_strong"] = True
 
     # Fetch reference avatar bytes once (from GitHub, stored by orchestrator)
     _ref_avatar_bytes: bytes | None = None
@@ -814,6 +860,9 @@ def enumerate_username(
                 "join_date": hit.get("join_date"),
                 "linked_urls": hit.get("linked_urls") or [],
                 "identity_mismatch": hit.get("identity_mismatch", False),
+                "avatar_similarity": hit.get("avatar_similarity"),
+                "username_similarity": hit.get("username_similarity"),
+                "username_similarity_strong": hit.get("username_similarity_strong", False),
             },
             "depth": depth + 1,
         }
