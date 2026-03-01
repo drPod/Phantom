@@ -709,6 +709,32 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             # =====================================================================
 
             _turn_limit = _MAX_AGENT_TURNS_DEMO if config.demo_mode else _MAX_AGENT_TURNS
+
+            # Wait for blast results before the planner sees the graph —
+            # otherwise turn-0 sees an empty graph and calls finish_investigation.
+            if in_flight.has_pending():
+                _bc, _bf = in_flight.harvest(timeout=15.0)
+                if not _bc and not _bf and in_flight.has_pending():
+                    _bc, _bf = in_flight.harvest(timeout=30.0)
+                total_completed += len(_bc)
+                total_failed += len(_bf)
+                for _m in _bc + _bf:
+                    _emit_resolver_done(scan_id, _m)
+                    if not _m.succeeded:
+                        failed_resolver_pairs.add((_m.resolver_name, _m.entity_key))
+                    try:
+                        tc.record_resolver(_m.resolver_name, _m.entity_key,
+                                           _m.succeeded, _m.error,
+                                           round(_m.duration * 1000, 1))
+                    except Exception:
+                        pass
+                if _bc or _bf:
+                    snapshot = _snapshot_dict(d, scan_id)
+                    graph_state.sync_from_dict(snapshot)
+                    _emit_resolver_progress(scan_id, in_flight, total_dispatched, total_completed, total_failed)
+                    log_scan_event(scan_id, "blast_harvest_done",
+                                   completed=len(_bc), failed=len(_bf))
+
             for _turn in range(_turn_limit):
                 # -- guard rails --
                 if time.monotonic() - start >= timeout_seconds:
