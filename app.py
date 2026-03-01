@@ -26,6 +26,7 @@ image = (
         "disposable-email-domains",
         "anthropic~=0.49",
         "tenacity~=8.2",
+        "Pillow~=11.0",
     )
     .env({"PYTHONPATH": "/root/osint_recon"})
     .add_local_dir(_local_dir, remote_path="/root/osint_recon")

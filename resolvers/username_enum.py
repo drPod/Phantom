@@ -485,6 +485,36 @@ def _distill_profiles(raw_profiles: list[dict], username: str, real_name: str | 
         return _fallback_distill(raw_profiles)
 
 
+def _is_name_mismatch(display_name: str, real_name: str) -> bool:
+    """Deterministic check: is display_name clearly a different real person than real_name?
+
+    Returns True only when:
+    1. display_name looks like a real full name (>= 2 alpha words, each >= 3 chars)
+    2. display_name shares ZERO token overlap with real_name
+
+    This catches "Andrew Harvey" / "Dillon Radford" / "Dr. Anthony Podloski" when
+    real_name is "Darsh Poddar" — without requiring an LLM call.
+
+    Does NOT fire on handles like "Dr_Pod", "drpod", "Dr Po D" (< 2 alpha words).
+    """
+    if not display_name or not real_name:
+        return False
+    real_tokens = {t for t in re.findall(r"[a-z]+", real_name.lower()) if len(t) >= 3}
+    if not real_tokens:
+        return False
+    # Extract alpha-only words >= 3 chars from display_name
+    display_words = [w for w in re.findall(r"[a-zA-Z]+", display_name) if len(w) >= 3]
+    # Must look like a real full name (>= 2 words)
+    if len(display_words) < 2:
+        return False
+    display_tokens = {w.lower() for w in display_words}
+    # If any token overlaps with real_name -> not a mismatch
+    if real_tokens & display_tokens:
+        return False
+    # No overlap -> flag as mismatch
+    return True
+
+
 async def _run_all_checks(username: str, sites: list[dict], deadline: float, scan_id: str = "", real_name: str | None = None, seed_email: str | None = None) -> list[dict]:
     """Run site checks concurrently with a wall-clock deadline.
 
@@ -586,6 +616,16 @@ async def _run_all_checks(username: str, sites: list[dict], deadline: float, sca
         distilled_entry = distilled[i] if i < len(distilled) else {}
         hits.append({**hit, **distilled_entry})
 
+    # -----------------------------------------------------------------------
+    # Post-distillation identity filters (applied BEFORE returning to caller)
+    # -----------------------------------------------------------------------
+    # These run outside the async context so avatar fetches are synchronous.
+
+    # 1. Fetch reference avatar bytes once (from __reference_avatar_url__ in Dict,
+    #    set by orchestrator.py from GitHub). We can't access the Dict here since
+    #    this is called from _run_all_checks which doesn't have scan_id passed
+    #    at this level — avatar filtering happens in enumerate_username() instead.
+
     return hits
 
 
@@ -639,11 +679,77 @@ def enumerate_username(
     deadline = wall_start + _WALL_CLOCK_BUDGET
     hits = asyncio.run(_run_all_checks(username, sites, deadline, scan_id=scan_id, real_name=real_name, seed_email=seed_email))
 
+    # -----------------------------------------------------------------------
+    # Post-distillation identity filters
+    # -----------------------------------------------------------------------
+    # These run synchronously here so we have access to the scan Dict (d),
+    # real_name, seed_email, and can make additional HTTP calls if needed.
+
+    # Fetch reference avatar bytes once (from GitHub, stored by orchestrator)
+    _ref_avatar_bytes: bytes | None = None
+    try:
+        _ref_avatar_url: str | None = d.get("__reference_avatar_url__") if "__reference_avatar_url__" in d else None
+    except Exception:
+        _ref_avatar_url = None
+    if _ref_avatar_url:
+        try:
+            from resolvers.avatar_similarity import fetch_image_bytes as _fetch_img
+            _ref_avatar_bytes = _fetch_img(_ref_avatar_url)
+            logger.info("enumerate_username: fetched reference avatar (%d bytes)", len(_ref_avatar_bytes) if _ref_avatar_bytes else 0)
+        except Exception as _e:
+            logger.debug("Could not fetch reference avatar: %s", _e)
+
+    _name_filter_hits = 0
+    _avatar_filter_hits = 0
+    for _profile in hits:
+        _display = (_profile.get("display_name") or "").strip()
+
+        # 1. Deterministic name mismatch filter (no LLM)
+        if real_name and not _profile.get("identity_mismatch") and _display:
+            if _is_name_mismatch(_display, real_name):
+                _profile["identity_mismatch"] = True
+                _name_filter_hits += 1
+                logger.info(
+                    "Name mismatch filter fired: display='%s' != real_name='%s' (site=%s)",
+                    _display, real_name, _profile.get("site_name", "?"),
+                )
+
+        # 2. Avatar comparison (only for profiles not already flagged)
+        if _ref_avatar_bytes and not _profile.get("identity_mismatch"):
+            _candidate_url = (_profile.get("avatar_url") or "").strip()
+            if _candidate_url:
+                try:
+                    from resolvers.avatar_similarity import fetch_image_bytes as _fetch_img, score_avatar_match as _score_avatar
+                    _candidate_bytes = _fetch_img(_candidate_url)
+                    if _candidate_bytes:
+                        _sim = _score_avatar(_ref_avatar_bytes, _candidate_bytes)
+                        _profile["avatar_similarity"] = round(_sim, 3)
+                        # Flag mismatch if very low similarity AND display name is populated
+                        if _sim < 0.2 and _display:
+                            _profile["identity_mismatch"] = True
+                            _avatar_filter_hits += 1
+                            logger.info(
+                                "Avatar mismatch filter fired: sim=%.2f for '%s' (site=%s)",
+                                _sim, _display, _profile.get("site_name", "?"),
+                            )
+                except Exception as _e:
+                    logger.debug("Avatar comparison failed for %s: %s", _candidate_url, _e)
+
+    if _name_filter_hits or _avatar_filter_hits:
+        logger.info(
+            "Identity filters: name_filter=%d, avatar_filter=%d / %d profiles",
+            _name_filter_hits, _avatar_filter_hits, len(hits),
+        )
+
+    # Recount after filtering (exclude misidentified profiles from hit count)
+    _confirmed_hits = [h for h in hits if not h.get("identity_mismatch")]
+
     metadata: dict[str, Any] = {
         "username": username,
         "sites_checked": len(sites),
-        "hits_count": len(hits),
-        "confirmed_profiles": hits,
+        "hits_count": len(_confirmed_hits),
+        "hits_count_total": len(hits),
+        "confirmed_profiles": hits,  # all profiles (mismatch flagged inline)
         "partial": time.monotonic() > deadline - 5,
     }
 

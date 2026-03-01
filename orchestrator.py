@@ -600,6 +600,25 @@ def run_scan(scan_id: str, seed_entity: dict[str, Any], config_dict: dict[str, A
             except Exception:
                 pass
 
+        # Fetch a reference avatar from GitHub (if seed is a username) so resolvers
+        # can compare scraped profile pictures against a known ground-truth image.
+        # Stored as __reference_avatar_url__ in the scan Dict.
+        if seed.type.value == "username":
+            _github_api = f"https://api.github.com/users/{seed.value}"
+            try:
+                import httpx as _httpx
+                _gh_resp = _httpx.get(
+                    _github_api, timeout=8,
+                    headers={"User-Agent": "osint-recon/1.0"},
+                )
+                if _gh_resp.status_code == 200:
+                    _avatar_url = _gh_resp.json().get("avatar_url", "")
+                    if _avatar_url:
+                        d["__reference_avatar_url__"] = _avatar_url
+                        logger.info("Reference avatar fetched from GitHub: %s", _avatar_url)
+            except Exception as _e:
+                logger.debug("Could not fetch GitHub reference avatar: %s", _e)
+
         seed_key = _entity_key(seed.type.value, seed.value)
         seed_node: dict[str, Any] = {
             "id": seed_key,
