@@ -109,7 +109,12 @@ RESOLVE_EMAIL = _tool(
         "EmailRep profiles), domains (Hunter email domain). "
         "Chain: if HIBP breaches found, run resolve_breach on the same email; "
         "if Gravatar username or Hunter social handle found, run "
-        "resolve_social + enumerate_username on that username."
+        "resolve_social + enumerate_username on that username. "
+        "FAILURE RECOVERY: if this tool returns a failure status, do NOT retry it. "
+        "Instead extract the username portion (user@domain.com → 'user' as username "
+        "candidate) and domain portion (@domain.com → 'domain.com' as domain candidate) "
+        "and queue those as separate enumerate_username and resolve_domain calls to "
+        "recover partial investigative value from the failed email entity."
     ),
     entity_types=["email"],
 )
@@ -176,10 +181,15 @@ CORRELATE_IDENTITIES: dict[str, Any] = {
         "currently in the scan graph.  Compares display names, bios, and "
         "metadata for same-type nodes and emits 'likely_same_person' edges "
         "between profiles that score >= 0.75 on the identity-match model.  "
-        "Call this after a cluster of related usernames or platform profiles "
-        "has been discovered to surface hidden identity links before continuing "
-        "the investigation.  Only scan_id is required; all other fields are "
-        "ignored."
+        "ONLY call this tool when you have at least 2 successfully resolved "
+        "nodes with overlapping attributes (shared usernames, emails, or "
+        "platform handles). Do NOT call this tool early in the investigation "
+        "before sufficient resolution data is available — it will fail or "
+        "return no matches with insufficient input. "
+        "If this tool returns a failure status, fall back to manual identity "
+        "coherence reasoning in your analyst brief (list shared bio keywords, "
+        "display names, and platform overlaps with a confidence estimate). "
+        "Only scan_id is required; all other fields are ignored."
     ),
     "input_schema": {
         "type": "object",
