@@ -58,6 +58,24 @@ def resolve_email(
     """Resolve an email via Hunter.io, EmailRep.io, Gravatar, HIBP, and Kickbox."""
     if not scan_id:
         return
+    try:
+        _resolve_email_impl(entity_value, entity_type, depth, source_entity_key, scan_id)
+    except Exception as exc:
+        logger.error("resolve_email top-level failure for %s (scan=%s): %s", entity_value, scan_id, exc)
+        try:
+            log_scan_event(scan_id, "resolver_failed", resolver="resolve_email",
+                           entity_key=f"email:{entity_value}", error=str(exc), service="top-level")
+        except Exception:
+            pass
+
+
+def _resolve_email_impl(
+    entity_value: str,
+    entity_type: str,
+    depth: int,
+    source_entity_key: str,
+    scan_id: str,
+) -> None:
     d = modal.Dict.from_name(f"osint-d-{scan_id}", create_if_missing=True)
     if "stop" in d:
         return
@@ -505,18 +523,24 @@ def resolve_email(
                 )
                 _backoff(attempt)
 
-    # Write node
-    node_payload = {
-        "id": node_id,
-        "type": EntityType.EMAIL.value,
-        "value": email,
-        "metadata": metadata,
-        "depth": depth,
-    }
-    d[f"{NODE_PREFIX}{node_id}"] = node_payload
-    write_stream_event(scan_id, "node", node_payload)
+    # Write node — wrapped so dict failures don't surface as resolver failures
+    try:
+        node_payload = {
+            "id": node_id,
+            "type": EntityType.EMAIL.value,
+            "value": email,
+            "metadata": metadata,
+            "depth": depth,
+        }
+        d[f"{NODE_PREFIX}{node_id}"] = node_payload
+        write_stream_event(scan_id, "node", node_payload)
+    except Exception as exc:
+        logger.error("resolve_email: node write failed for %s: %s", node_id, exc)
 
-    d[f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"] = edges_batch
-    for edge in edges_batch:
-        write_stream_event(scan_id, "edge", edge)
+    try:
+        d[f"{EDGES_BATCH_PREFIX}{uuid.uuid4().hex}"] = edges_batch
+        for edge in edges_batch:
+            write_stream_event(scan_id, "edge", edge)
+    except Exception as exc:
+        logger.error("resolve_email: edges write failed for %s: %s", node_id, exc)
 
