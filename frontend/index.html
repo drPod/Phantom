@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PHANTOM — OSINT Intelligence</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -89,6 +90,7 @@
     #sse-dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     #sse-dot.error     { background: var(--error);  box-shadow: 0 0 6px var(--error); }
     #sse-dot.idle      { background: var(--text2); }
+    #sse-dot.complete  { background: var(--success); box-shadow: 0 0 6px var(--success); }
 
     @keyframes scanning-blink {
       0%, 100% { opacity: 1; }
@@ -98,6 +100,54 @@
       color: var(--accent);
       animation: scanning-blink 1.1s ease-in-out infinite;
       font-weight: bold;
+    }
+    @keyframes complete-glow {
+      0%   { text-shadow: 0 0 8px rgba(80,200,120,0.8); }
+      100% { text-shadow: none; }
+    }
+    #sse-label.complete {
+      color: var(--success);
+      font-weight: bold;
+      animation: complete-glow 1.5s ease-out forwards;
+    }
+
+    /* ── scan complete banner ──────────────────────────────────── */
+    #scan-complete-banner {
+      flex: 0 0 auto;
+      height: 32px;
+      background: var(--bg2);
+      border-top: 2px solid var(--success);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 6px;
+      font-size: 11px;
+      letter-spacing: 0.8px;
+      animation: banner-slide-in 0.3s ease-out;
+    }
+    #scan-complete-banner.hidden { display: none; }
+    #scan-complete-banner.status-failed  { border-top-color: var(--error); }
+    #scan-complete-banner.status-cancelled { border-top-color: var(--warn); }
+
+    @keyframes banner-slide-in {
+      from { opacity: 0; transform: translateY(-100%); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    #scan-complete-banner .banner-label {
+      font-weight: bold;
+      color: var(--success);
+      letter-spacing: 2px;
+    }
+    #scan-complete-banner.status-failed .banner-label  { color: var(--error); }
+    #scan-complete-banner.status-cancelled .banner-label { color: var(--warn); }
+
+    #scan-complete-banner .banner-stats {
+      color: var(--text2);
+      margin-left: 4px;
+    }
+    #scan-complete-banner .banner-stats .banner-val {
+      color: var(--text);
     }
 
     /* ── input row ──────────────────────────────────────────────── */
@@ -499,8 +549,24 @@
 
     .stat-item span { color: var(--text); }
 
-    #export-btn {
+    #resolver-status-msg {
+      font-size: 10px;
+      color: var(--accent);
+      letter-spacing: 0.5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 340px;
+      animation: scanning-blink 1.4s ease-in-out infinite;
+    }
+    #resolver-status-msg.hidden { display: none; }
+
+    #export-wrap {
       margin-left: auto;
+      position: relative;
+      display: none;
+    }
+    #export-btn {
       background: transparent;
       border: 1px solid var(--success);
       color: var(--success);
@@ -514,6 +580,36 @@
       text-decoration: none;
     }
     #export-btn:hover { background: rgba(80,200,120,0.12); }
+    #export-dropdown {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      right: 0;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      z-index: 9000;
+      min-width: 150px;
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.5);
+    }
+    #export-dropdown.open { display: block; }
+    .export-option {
+      display: block;
+      width: 100%;
+      padding: 8px 14px;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.15s;
+    }
+    .export-option:hover { background: rgba(80,200,120,0.12); color: var(--success); }
+    .export-option + .export-option { border-top: 1px solid var(--border); }
 
     #report-btn {
       background: transparent;
@@ -755,6 +851,84 @@
     .rp-seg.failed    { color: var(--warn); }
     .rp-seg.total     { color: var(--text2); }
 
+    /* ── resolver detail rows ────────────────────────────────────── */
+    #resolver-detail {
+      flex: 0 0 auto;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    #resolver-detail.hidden { display: none; }
+
+    .rd-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 18px;
+      font-size: 10px;
+      font-family: var(--font);
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      transition: opacity 0.4s ease;
+    }
+    .rd-row:last-child { border-bottom: none; }
+    .rd-row.rd-fading  { opacity: 0; }
+
+    @keyframes rd-spin {
+      to { transform: rotate(360deg); }
+    }
+    .rd-spinner {
+      width: 10px;
+      height: 10px;
+      border: 1.5px solid var(--border2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: rd-spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+    .rd-row.rd-done .rd-spinner {
+      animation: none;
+      border-color: var(--success);
+      border-top-color: var(--success);
+    }
+    .rd-row.rd-failed .rd-spinner {
+      animation: none;
+      border-color: var(--warn);
+      border-top-color: var(--warn);
+    }
+
+    .rd-name {
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+    .rd-entity {
+      color: var(--text);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rd-elapsed {
+      color: var(--text2);
+      flex-shrink: 0;
+      min-width: 36px;
+      text-align: right;
+    }
+    .rd-status-badge {
+      flex-shrink: 0;
+      font-size: 9px;
+      letter-spacing: 1px;
+      padding: 1px 5px;
+      border-radius: 2px;
+    }
+    .rd-status-badge.running  { color: var(--accent);  background: rgba(74,158,255,0.12); }
+    .rd-status-badge.done     { color: var(--success); background: rgba(80,200,120,0.12); }
+    .rd-status-badge.failed   { color: var(--warn);    background: rgba(255,140,66,0.12); }
+
     /* ── D3 graph styles ────────────────────────────────────────── */
     .link {
       stroke-opacity: 0.55;
@@ -807,6 +981,210 @@
       width: 26px;
       height: 0;
       flex-shrink: 0;
+    }
+    .legend-section-title {
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      color: var(--text2);
+      opacity: 0.6;
+      text-transform: uppercase;
+      margin-top: 5px;
+      margin-bottom: 1px;
+      padding-bottom: 2px;
+      border-bottom: 1px solid var(--border);
+    }
+    .legend-section-title:first-child {
+      margin-top: 0;
+    }
+
+    /* ── graph controls toolbar ──────────────────────────────────── */
+    #graph-controls {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 50;
+      pointer-events: auto;
+    }
+
+    #zoom-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(10, 14, 26, 0.82);
+      border: 1px solid var(--border2);
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-family: var(--font);
+    }
+
+    #zoom-toolbar button {
+      background: transparent;
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      font-family: var(--font);
+      font-size: 12px;
+      width: 28px;
+      height: 26px;
+      border-radius: 3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s;
+      padding: 0;
+    }
+    #zoom-toolbar button:hover {
+      background: var(--bg3);
+      color: var(--text);
+    }
+
+    #zoom-level {
+      font-size: 9px;
+      color: var(--text2);
+      letter-spacing: 0.5px;
+      min-width: 36px;
+      text-align: center;
+      user-select: none;
+    }
+
+    /* ── spread slider ───────────────────────────────────────────── */
+    #spread-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(10, 14, 26, 0.82);
+      border: 1px solid var(--border2);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-family: var(--font);
+    }
+
+    #spread-row label {
+      font-size: 9px;
+      color: var(--text2);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    #spread-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 90px;
+      height: 4px;
+      background: var(--border2);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    #spread-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #spread-slider::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: var(--accent);
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* ── type filter panel ────────────────────────────────────────── */
+    #type-filter {
+      background: rgba(10, 14, 26, 0.82);
+      border: 1px solid var(--border2);
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-family: var(--font);
+      max-height: 280px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border2) transparent;
+    }
+
+    #type-filter-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 5px;
+    }
+
+    #type-filter-title {
+      font-size: 9px;
+      color: var(--text2);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      user-select: none;
+    }
+
+    #type-filter-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    #type-filter-actions button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text2);
+      font-family: var(--font);
+      font-size: 8px;
+      letter-spacing: 0.5px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    #type-filter-actions button:hover {
+      background: var(--bg3);
+      color: var(--text);
+    }
+
+    .type-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 6px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .type-pill:hover {
+      background: rgba(255,255,255,0.04);
+    }
+    .type-pill.hidden-type {
+      opacity: 0.35;
+    }
+
+    .type-pill-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .type-pill-label {
+      font-size: 10px;
+      color: var(--text);
+      letter-spacing: 0.3px;
+      flex: 1;
+    }
+
+    .type-pill-count {
+      font-size: 9px;
+      color: var(--text2);
+      min-width: 16px;
+      text-align: right;
     }
 
     .node-circle {
@@ -1140,6 +1518,10 @@
     .transcript-entry .brief-text.expanded {
       max-height: none;
     }
+    .transcript-entry .brief-text.reasoning {
+      border-left-color: #1ABC9C;
+      background: rgba(26,188,156,0.08);
+    }
     .transcript-entry .brief-meta {
       font-size: 9px;
       color: var(--text2);
@@ -1191,12 +1573,56 @@
     <span id="rp-total" class="rp-seg total">/ 0 total</span>
   </div>
 
+  <!-- ── resolver detail rows ──────────────────────────────────── -->
+  <div id="resolver-detail" class="hidden"></div>
+
+  <!-- ── scan complete banner ─────────────────────────────────── -->
+  <div id="scan-complete-banner" class="hidden">
+    <span class="banner-label"></span>
+    <span class="banner-stats"></span>
+  </div>
+
   <!-- ── main ─────────────────────────────────────────────────────── -->
   <div id="main">
     <div id="graph-wrap">
       <svg id="graph"></svg>
       <div id="tooltip"></div>
+
+      <!-- ── graph controls (zoom + spread + filter) ──────────────── -->
+      <div id="graph-controls">
+        <div id="zoom-toolbar">
+          <button id="zoom-in-btn" title="Zoom in">+</button>
+          <button id="zoom-out-btn" title="Zoom out">&minus;</button>
+          <span id="zoom-level">100%</span>
+          <button id="zoom-fit-btn" title="Fit to view">FIT</button>
+          <button id="zoom-reset-btn" title="Reset zoom">RST</button>
+        </div>
+        <div id="spread-row">
+          <label for="spread-slider">SPREAD</label>
+          <input id="spread-slider" type="range" min="-800" max="-100" value="-320" step="10" />
+        </div>
+        <div id="type-filter">
+          <div id="type-filter-header">
+            <span id="type-filter-title">FILTER</span>
+            <div id="type-filter-actions">
+              <button id="filter-show-all">ALL</button>
+              <button id="filter-hide-all">NONE</button>
+            </div>
+          </div>
+          <div id="type-filter-pills"></div>
+        </div>
+      </div>
+
       <div id="graph-legend">
+        <div class="legend-section-title">nodes</div>
+        <div class="legend-nodes"></div>
+        <div class="legend-row" style="margin-top:3px">
+          <svg width="12" height="12" style="flex-shrink:0">
+            <circle cx="6" cy="6" r="5" fill="transparent" stroke="#FFD700" stroke-width="2"/>
+          </svg>
+          <span style="color:var(--gold)">seed node</span>
+        </div>
+        <div class="legend-section-title" style="margin-top:7px">edges</div>
         <div class="legend-row">
           <svg width="26" height="10" style="flex-shrink:0">
             <line x1="0" y1="5" x2="26" y2="5" stroke="#4A9EFF" stroke-width="1.8" stroke-opacity="0.7"/>
@@ -1233,8 +1659,15 @@
     <span class="stat-item">EDGES: <span id="stat-edges">0</span></span>
     <span class="stat-item">RESOLVERS: <span id="stat-resolvers">0</span></span>
     <span class="stat-item">ELAPSED: <span id="stat-elapsed">—</span></span>
+    <span id="resolver-status-msg" class="hidden"></span>
     <span class="stat-item" style="color:#3a4f6a;">SCAN: <span id="stat-scanid" style="color:#3a4f6a;">—</span></span>
-    <a id="export-btn" style="display:none">⬇ EXPORT JSON</a>
+    <div id="export-wrap">
+      <button id="export-btn">⬇ EXPORT</button>
+      <div id="export-dropdown">
+        <button class="export-option" id="export-json-opt">EXPORT JSON</button>
+        <button class="export-option" id="export-png-opt">EXPORT PNG</button>
+      </div>
+    </div>
     <button id="report-btn" style="display:none">📋 REPORT</button>
     <span id="report-generating" style="display:none">GENERATING REPORT...</span>
   </div>
@@ -1387,7 +1820,8 @@ function nodeLabel(d) {
 // ════════════════════════════════════════════════════════════════════
 //  STATE
 // ════════════════════════════════════════════════════════════════════
-let eventSource    = null;
+let pollTimer      = null;
+let lastSeq        = -1;
 let currentScanId  = null;
 let startTime      = null;
 let elapsedTimer   = null;
@@ -1407,9 +1841,18 @@ let debugActivityLog = [];        // merged from REST + SSE
 let debugResolverRows = [];       // derived from activity log
 let debugFeedNearBottom = true;   // for auto-scroll
 
+// Resolver detail panel state
+const resolverDetailEl = document.getElementById('resolver-detail');
+// Map of rowKey -> { el, startTs, intervalId }
+const rdActiveRows = new Map();
+
 // Agent transcript panel state
 let transcriptPanelOpen = false;
 let transcriptLog       = [];
+
+// Graph control state
+const hiddenTypes  = new Set();
+let   currentZoomK = 1;
 
 // ════════════════════════════════════════════════════════════════════
 //  D3 SETUP
@@ -1485,6 +1928,25 @@ defs.append('marker')
   .attr('fill', '#9B59B6')
   .attr('fill-opacity', 0.75);
 
+// ── node legend ──────────────────────────────────────────────────────
+(function populateNodeLegend() {
+  const nodeSection = document.querySelector('#graph-legend .legend-nodes');
+  if (!nodeSection) return;
+  Object.entries(NODE_COLORS).forEach(([type, color]) => {
+    if (type === 'default') return;
+    const emoji = TYPE_EMOJIS[type] || '';
+    const label = type.replace(/_/g, ' ');
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    row.innerHTML =
+      `<svg width="12" height="12" style="flex-shrink:0">` +
+        `<circle cx="6" cy="6" r="5" fill="${color}" opacity="0.85"/>` +
+      `</svg>` +
+      `<span style="color:${color}">${emoji} ${label}</span>`;
+    nodeSection.appendChild(row);
+  });
+})();
+
 // ── layers ───────────────────────────────────────────────────────────
 const linkLayer = g.append('g').attr('class', 'link-layer');
 const hullLayer = g.append('g').attr('class', 'hull-layer');
@@ -1510,9 +1972,27 @@ function resetCenter() {
 resetCenter();
 
 // ── zoom / pan ───────────────────────────────────────────────────────
+const zoomLevelEl = document.getElementById('zoom-level');
+
+function updateLabelVisibility() {
+  nodeLayer.selectAll('.node-label')
+    .attr('display', function() {
+      const d = d3.select(this.parentNode).datum();
+      if (!d) return null;
+      if (currentZoomK >= 0.8) return null;
+      if (currentZoomK >= 0.4 && (isSeed(d) || (d.depth || 0) <= 1)) return null;
+      return 'none';
+    });
+}
+
 const zoom = d3.zoom()
   .scaleExtent([0.08, 8])
-  .on('zoom', e => g.attr('transform', e.transform));
+  .on('zoom', e => {
+    g.attr('transform', e.transform);
+    currentZoomK = e.transform.k;
+    zoomLevelEl.textContent = Math.round(currentZoomK * 100) + '%';
+    updateLabelVisibility();
+  });
 svg.call(zoom);
 
 window.addEventListener('resize', () => {
@@ -1543,6 +2023,128 @@ function zoomToFit(padding = 60) {
   svg.transition().duration(900).ease(d3.easeCubicInOut)
     .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 }
+
+// ── zoom toolbar handlers ────────────────────────────────────────────
+document.getElementById('zoom-in-btn').addEventListener('click', () => {
+  svg.transition().duration(300).call(zoom.scaleBy, 1.4);
+});
+document.getElementById('zoom-out-btn').addEventListener('click', () => {
+  svg.transition().duration(300).call(zoom.scaleBy, 1 / 1.4);
+});
+document.getElementById('zoom-fit-btn').addEventListener('click', () => zoomToFit());
+document.getElementById('zoom-reset-btn').addEventListener('click', () => {
+  svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+});
+
+// ── spread slider ────────────────────────────────────────────────────
+const spreadSlider = document.getElementById('spread-slider');
+spreadSlider.addEventListener('input', () => {
+  const val = +spreadSlider.value;
+  simulation.force('charge').strength(val);
+  simulation.alpha(0.3).restart();
+});
+
+// ── type filter ──────────────────────────────────────────────────────
+const filterPillsEl = document.getElementById('type-filter-pills');
+
+function buildFilterPanel() {
+  filterPillsEl.innerHTML = '';
+  const typeCounts = new Map();
+  nodes.forEach(n => {
+    const t = n.type || 'default';
+    typeCounts.set(t, (typeCounts.get(t) || 0) + 1);
+  });
+
+  const orderedTypes = Object.keys(NODE_COLORS).filter(t => t !== 'default' && typeCounts.has(t));
+  if (typeCounts.has('default')) orderedTypes.push('default');
+
+  orderedTypes.forEach(type => {
+    const pill = document.createElement('div');
+    pill.className = 'type-pill' + (hiddenTypes.has(type) ? ' hidden-type' : '');
+    pill.dataset.type = type;
+
+    const swatch = document.createElement('span');
+    swatch.className = 'type-pill-swatch';
+    swatch.style.background = NODE_COLORS[type] || NODE_COLORS.default;
+
+    const label = document.createElement('span');
+    label.className = 'type-pill-label';
+    const emoji = TYPE_EMOJIS[type] || TYPE_EMOJIS.default;
+    label.textContent = `${emoji} ${type.replace(/_/g, ' ')}`;
+
+    const count = document.createElement('span');
+    count.className = 'type-pill-count';
+    count.textContent = typeCounts.get(type) || 0;
+
+    pill.appendChild(swatch);
+    pill.appendChild(label);
+    pill.appendChild(count);
+
+    pill.addEventListener('click', () => {
+      if (hiddenTypes.has(type)) {
+        hiddenTypes.delete(type);
+        pill.classList.remove('hidden-type');
+      } else {
+        hiddenTypes.add(type);
+        pill.classList.add('hidden-type');
+      }
+      applyFilter();
+    });
+
+    filterPillsEl.appendChild(pill);
+  });
+}
+
+function updateFilterCounts() {
+  const typeCounts = new Map();
+  nodes.forEach(n => {
+    const t = n.type || 'default';
+    typeCounts.set(t, (typeCounts.get(t) || 0) + 1);
+  });
+  filterPillsEl.querySelectorAll('.type-pill').forEach(pill => {
+    const type = pill.dataset.type;
+    const countEl = pill.querySelector('.type-pill-count');
+    if (countEl) countEl.textContent = typeCounts.get(type) || 0;
+  });
+}
+
+function applyFilter() {
+  const visibleNodes = nodes.filter(n => !hiddenTypes.has(n.type || 'default'));
+  const visibleIds = new Set(visibleNodes.map(n => n.id));
+  const visibleLinks = links.filter(l => {
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    return visibleIds.has(sid) && visibleIds.has(tid);
+  });
+
+  nodeLayer.selectAll('g.node')
+    .attr('display', d => hiddenTypes.has(d.type || 'default') ? 'none' : null);
+
+  linkLayer.selectAll('line')
+    .attr('display', d => {
+      const sid = typeof d.source === 'object' ? d.source.id : d.source;
+      const tid = typeof d.target === 'object' ? d.target.id : d.target;
+      return (visibleIds.has(sid) && visibleIds.has(tid)) ? null : 'none';
+    });
+
+  simulation.nodes(visibleNodes);
+  simulation.force('link').links(visibleLinks);
+  simulation.alpha(0.3).restart();
+}
+
+document.getElementById('filter-show-all').addEventListener('click', () => {
+  hiddenTypes.clear();
+  filterPillsEl.querySelectorAll('.type-pill').forEach(p => p.classList.remove('hidden-type'));
+  applyFilter();
+});
+
+document.getElementById('filter-hide-all').addEventListener('click', () => {
+  filterPillsEl.querySelectorAll('.type-pill').forEach(p => {
+    hiddenTypes.add(p.dataset.type);
+    p.classList.add('hidden-type');
+  });
+  applyFilter();
+});
 
 // ── tooltip ──────────────────────────────────────────────────────────
 const tooltip = document.getElementById('tooltip');
@@ -1692,10 +2294,15 @@ function updateGraph() {
   // update identity cluster hulls
   updateHulls();
 
-  // restart
-  simulation.nodes(nodes);
-  simulation.force('link').links(links);
-  simulation.alpha(0.3).restart();
+  // rebuild filter panel counts & apply visibility
+  buildFilterPanel();
+  if (hiddenTypes.size > 0) {
+    applyFilter();
+  } else {
+    simulation.nodes(nodes);
+    simulation.force('link').links(links);
+    simulation.alpha(0.3).restart();
+  }
 }
 
 function showTooltip(event, text) {
@@ -2036,7 +2643,11 @@ const elEdges     = document.getElementById('stat-edges');
 const elResolvers = document.getElementById('stat-resolvers');
 const elElapsed   = document.getElementById('stat-elapsed');
 const elScanId    = document.getElementById('stat-scanid');
+const exportWrap  = document.getElementById('export-wrap');
 const exportBtn   = document.getElementById('export-btn');
+const exportDropdown = document.getElementById('export-dropdown');
+const exportJsonOpt  = document.getElementById('export-json-opt');
+const exportPngOpt   = document.getElementById('export-png-opt');
 
 function updateStats() {
   elNodes.textContent = nodesMap.size;
@@ -2046,6 +2657,7 @@ function updateStats() {
   } else {
     elResolvers.textContent = resolversSeen.size;
   }
+  exportWrap.style.display = nodesMap.size > 0 ? '' : 'none';
 }
 
 function startElapsedTimer() {
@@ -2062,6 +2674,120 @@ function startElapsedTimer() {
 function stopElapsedTimer() {
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  EXPORT (JSON + PNG)
+// ════════════════════════════════════════════════════════════════════
+
+function exportJSON() {
+  const payload = {
+    scan_id: currentScanId,
+    exported_at: new Date().toISOString(),
+    nodes: Array.from(nodesMap.values()).map(n => ({
+      id: n.id, type: n.type, value: n.value,
+      metadata: n.metadata || {}, depth: n.depth
+    })),
+    edges: links.map(l => ({
+      source: typeof l.source === 'object' ? l.source.id : l.source,
+      target: typeof l.target === 'object' ? l.target.id : l.target,
+      relationship: l.relationship,
+      confidence: l.confidence
+    })),
+    report: currentReport || null
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `phantom-${(currentScanId || 'export').slice(0, 8)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportPNG() {
+  const { w, h } = getSize();
+  const cloned = svgEl.cloneNode(true);
+  cloned.setAttribute('width', w);
+  cloned.setAttribute('height', h);
+  cloned.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+  const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  styleEl.textContent = `
+    text { font-family: 'JetBrains Mono', 'Fira Code', monospace; fill: #c8ccd4; }
+    line { stroke-opacity: 0.55; }
+    circle { stroke-width: 2; }
+    .identity-hull { fill-opacity: 0.06; stroke-opacity: 0.25; stroke-width: 1.5; stroke-dasharray: 6 3; }
+  `;
+  cloned.insertBefore(styleEl, cloned.firstChild);
+
+  const origChildren = svgEl.querySelectorAll('*');
+  const clonedChildren = cloned.querySelectorAll('*');
+  for (let i = 0; i < origChildren.length && i < clonedChildren.length; i++) {
+    const orig = origChildren[i];
+    const clone = clonedChildren[i];
+    if (orig.nodeType !== 1) continue;
+    const computed = window.getComputedStyle(orig);
+    const svgAttrs = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray',
+                      'stroke-opacity', 'fill-opacity', 'opacity', 'font-size',
+                      'font-family', 'text-anchor', 'dominant-baseline'];
+    svgAttrs.forEach(attr => {
+      const val = computed.getPropertyValue(attr);
+      if (val) clone.style.setProperty(attr, val);
+    });
+  }
+
+  const serializer = new XMLSerializer();
+  const svgString = serializer.serializeToString(cloned);
+  const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = w * 2;
+    canvas.height = h * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2);
+    ctx.fillStyle = '#0a0e14';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `phantom-${(currentScanId || 'export').slice(0, 8)}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, 'image/png');
+  };
+  img.src = url;
+}
+
+function toggleExportDropdown() {
+  exportDropdown.classList.toggle('open');
+}
+
+function closeExportDropdown() {
+  exportDropdown.classList.remove('open');
+}
+
+exportBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleExportDropdown();
+});
+
+exportJsonOpt.addEventListener('click', (e) => {
+  e.stopPropagation();
+  closeExportDropdown();
+  exportJSON();
+});
+
+exportPngOpt.addEventListener('click', (e) => {
+  e.stopPropagation();
+  closeExportDropdown();
+  exportPNG();
+});
+
+document.addEventListener('click', () => closeExportDropdown());
 
 // ════════════════════════════════════════════════════════════════════
 //  DEBUG PANEL
@@ -2184,6 +2910,19 @@ function updateTranscriptFeed() {
         msg.textContent = entry.payload.message;
         div.appendChild(msg);
       }
+    } else if (entry.type === 'planner_reasoning') {
+      const badge = document.createElement('span');
+      badge.className = 'badge planner';
+      badge.textContent = 'REASONING';
+      div.appendChild(badge);
+
+      const reasonEl = document.createElement('div');
+      reasonEl.className = 'brief-text reasoning';
+      reasonEl.textContent = entry.payload.text;
+      reasonEl.addEventListener('click', () => {
+        reasonEl.classList.toggle('expanded');
+      });
+      div.appendChild(reasonEl);
     }
 
     transcriptFeedEl.appendChild(div);
@@ -2520,7 +3259,7 @@ const sseLabel = document.getElementById('sse-label');
 
 function setSseStatus(state) {
   sseDot.className = '';
-  sseLabel.classList.remove('scanning');
+  sseLabel.classList.remove('scanning', 'complete');
 
   if (state === 'connected') {
     sseDot.classList.add('connected');
@@ -2529,6 +3268,10 @@ function setSseStatus(state) {
   } else if (state === 'error') {
     sseDot.classList.add('error');
     sseLabel.textContent = 'RECONNECTING';
+  } else if (state === 'complete') {
+    sseDot.classList.add('complete');
+    sseLabel.textContent = 'SCAN COMPLETE';
+    sseLabel.classList.add('complete');
   } else {
     sseDot.classList.add('idle');
     sseLabel.textContent = 'IDLE';
@@ -2573,6 +3316,9 @@ function startScan() {
   links = [];
   scanCompleted = false;
   sseRetryCount = 0;
+  hiddenTypes.clear();
+  spreadSlider.value = -320;
+  simulation.force('charge').strength(-320);
   updateGraph();
   collapseSidebar();
   resetDebugPanel();
@@ -2580,7 +3326,10 @@ function startScan() {
   resetReport();
   resetNarrationFeed();
   resetResolverProgress();
-  exportBtn.style.display = 'none';
+  resetResolverDetail();
+  hideCompletionBanner();
+  exportWrap.style.display = 'none';
+  closeExportDropdown();
   scanBtn.disabled  = true;
   demoBtn.disabled  = true;
   stopBtn.classList.remove('hidden');
@@ -2632,40 +3381,60 @@ function stopScan() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  SSE
+//  POLLING
 // ════════════════════════════════════════════════════════════════════
 let sseRetryCount = 0;
 const SSE_MAX_RETRIES = 5;
+const POLL_INTERVAL_MS = 500;
 
 function openSSE(scanId) {
-  if (eventSource) { eventSource.close(); eventSource = null; }
-
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  lastSeq = -1;
   setSseStatus('connected');
-  eventSource = new EventSource(API_BASE_URL + '/scan/' + scanId + '/stream');
+  pollEvents();
+  pollTimer = setInterval(pollEvents, POLL_INTERVAL_MS);
+}
 
-  eventSource.onmessage = function(event) {
-    sseRetryCount = 0;  // reset on successful message
-    let data;
-    try { data = JSON.parse(event.data); }
-    catch { return; }
-    handleEvent(data);
-  };
-
-  eventSource.onerror = function() {
-    if (scanCompleted) return;
-    setSseStatus('error');
-    eventSource.close();
-    eventSource = null;
-    sseRetryCount++;
-    if (sseRetryCount > SSE_MAX_RETRIES) {
-      console.error('SSE max retries reached, giving up');
-      return;
-    }
-    const delay = Math.min(1000 * Math.pow(2, sseRetryCount - 1), 30000);
-    setTimeout(() => {
-      if (currentScanId && !scanCompleted) openSSE(currentScanId);
-    }, delay);
-  };
+function pollEvents() {
+  if (!currentScanId || scanCompleted) return;
+  fetch(API_BASE_URL + '/scan/' + currentScanId + '/events?after=' + lastSeq)
+    .then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function(data) {
+      sseRetryCount = 0;
+      const events = data.events || [];
+      events.forEach(function(evt) {
+        if (evt.seq > lastSeq) lastSeq = evt.seq;
+        handleEvent(evt);
+      });
+      if (data.terminal) {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (data.status) {
+          handleEvent({ type: 'status', payload: data.status, seq: -1, ts: Date.now() / 1000 });
+        }
+      }
+    })
+    .catch(function() {
+      if (scanCompleted) return;
+      setSseStatus('error');
+      sseRetryCount++;
+      if (sseRetryCount > SSE_MAX_RETRIES) {
+        console.error('Polling max retries reached, giving up');
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        return;
+      }
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      const delay = Math.min(1000 * Math.pow(2, sseRetryCount - 1), 30000);
+      setTimeout(function() {
+        if (currentScanId && !scanCompleted) {
+          setSseStatus('connected');
+          pollEvents();
+          pollTimer = setInterval(pollEvents, POLL_INTERVAL_MS);
+        }
+      }, delay);
+    });
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2688,7 +3457,7 @@ function handleEvent(data) {
     handleReportEvent(data.payload);
   } else if (data.type === 'narration') {
     handleNarration(data.payload);
-  } else if (data.type === 'planner_action' || data.type === 'analyst_brief' || data.type === 'planner_status') {
+  } else if (data.type === 'planner_action' || data.type === 'analyst_brief' || data.type === 'planner_status' || data.type === 'planner_reasoning') {
     transcriptLog.push({ type: data.type, payload: data.payload, ts: data.ts });
     updateTranscriptFeed();
   } else if (data.type === 'error') {
@@ -2771,26 +3540,136 @@ function flushPendingEdges() {
 }
 
 function handleResolverStatus(payload) {
-  if (!payload || !debugPanelOpen) return;
+  if (!payload) return;
   const p = payload;
-  const row = {
-    resolver: p.resolver_name || p.resolver,
-    entity_key: p.entity_key,
-    status: p.status === 'done' || p.status === 'completed' ? 'done' : p.status === 'failed' ? 'failed' : 'running',
-    duration_ms: p.duration_ms ?? (p.duration != null ? Math.round(p.duration * 1000) : null),
-    nodes_found: p.nodes_found ?? 0,
-    edges_found: p.edges_found ?? 0,
-    error: p.error || null,
-    ts: p.ts ?? Date.now() / 1000,
-    seq: debugResolverRows.length,
-  };
-  const idx = debugResolverRows.findIndex(r => r.resolver === row.resolver && r.entity_key === row.entity_key && r.status === 'running');
-  if (idx >= 0) {
-    debugResolverRows[idx] = row;
-  } else {
-    debugResolverRows.push(row);
+  const resolverName = p.resolver_name || p.resolver || '';
+  const entityKey    = p.entity_key || '';
+  const status       = p.status === 'done' || p.status === 'completed' ? 'done'
+                     : p.status === 'failed' ? 'failed' : 'running';
+  const elapsedS     = p.elapsed_s ?? null;
+
+  // ── debug panel row (unchanged behaviour) ──────────────────────────
+  if (debugPanelOpen) {
+    const row = {
+      resolver: resolverName,
+      entity_key: entityKey,
+      status,
+      duration_ms: p.duration_ms ?? (p.duration != null ? Math.round(p.duration * 1000) : null),
+      nodes_found: p.nodes_found ?? 0,
+      edges_found: p.edges_found ?? 0,
+      error: p.error || null,
+      ts: p.ts ?? Date.now() / 1000,
+      seq: debugResolverRows.length,
+    };
+    const idx = debugResolverRows.findIndex(r => r.resolver === row.resolver && r.entity_key === row.entity_key && r.status === 'running');
+    if (idx >= 0) {
+      debugResolverRows[idx] = row;
+    } else {
+      debugResolverRows.push(row);
+    }
+    updateDebugResolverTable(debugResolverRows);
   }
-  updateDebugResolverTable(debugResolverRows);
+
+  // ── resolver detail panel ───────────────────────────────────────────
+  const rowKey = `${resolverName}::${entityKey}`;
+  const displayName = resolverName.replace(/_/g, ' ');
+  // Extract just the value portion of entity_key (e.g. "username:foo" -> "foo")
+  const entityDisplay = entityKey.includes(':') ? entityKey.split(':').slice(1).join(':') : entityKey;
+
+  if (status === 'running') {
+    if (!rdActiveRows.has(rowKey)) {
+      // Create a new row
+      const rowEl = document.createElement('div');
+      rowEl.className = 'rd-row';
+      rowEl.dataset.rowKey = rowKey;
+
+      const spinner = document.createElement('div');
+      spinner.className = 'rd-spinner';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'rd-name';
+      nameEl.textContent = displayName;
+
+      const entityEl = document.createElement('span');
+      entityEl.className = 'rd-entity';
+      entityEl.textContent = entityDisplay;
+
+      const elapsedEl = document.createElement('span');
+      elapsedEl.className = 'rd-elapsed';
+      elapsedEl.textContent = '0s';
+
+      const badge = document.createElement('span');
+      badge.className = 'rd-status-badge running';
+      badge.textContent = 'RUNNING';
+
+      rowEl.appendChild(spinner);
+      rowEl.appendChild(nameEl);
+      rowEl.appendChild(entityEl);
+      rowEl.appendChild(elapsedEl);
+      rowEl.appendChild(badge);
+
+      resolverDetailEl.appendChild(rowEl);
+      resolverDetailEl.classList.remove('hidden');
+
+      // Determine start time: use server-reported elapsed to back-calculate
+      const startTs = Date.now() - (elapsedS != null ? elapsedS * 1000 : 0);
+      const intervalId = setInterval(() => {
+        const sec = Math.floor((Date.now() - startTs) / 1000);
+        elapsedEl.textContent = sec >= 60
+          ? `${Math.floor(sec / 60)}m ${sec % 60}s`
+          : `${sec}s`;
+      }, 500);
+
+      rdActiveRows.set(rowKey, { el: rowEl, startTs, intervalId, elapsedEl });
+    } else {
+      // Update elapsed display immediately from server report
+      const entry = rdActiveRows.get(rowKey);
+      if (elapsedS != null && entry.elapsedEl) {
+        const sec = Math.round(elapsedS);
+        entry.elapsedEl.textContent = sec >= 60
+          ? `${Math.floor(sec / 60)}m ${sec % 60}s`
+          : `${sec}s`;
+      }
+    }
+  } else {
+    // done or failed — finalise the row
+    const entry = rdActiveRows.get(rowKey);
+    if (entry) {
+      clearInterval(entry.intervalId);
+      const { el, elapsedEl } = entry;
+      el.classList.add(status === 'done' ? 'rd-done' : 'rd-failed');
+      const badge = el.querySelector('.rd-status-badge');
+      if (badge) {
+        badge.className = `rd-status-badge ${status}`;
+        badge.textContent = status === 'done' ? 'DONE' : 'FAILED';
+      }
+      if (elapsedEl && elapsedS != null) {
+        const sec = Math.round(elapsedS);
+        elapsedEl.textContent = sec >= 60
+          ? `${Math.floor(sec / 60)}m ${sec % 60}s`
+          : `${sec}s`;
+      }
+      rdActiveRows.delete(rowKey);
+
+      // Fade out and remove after a short delay
+      setTimeout(() => {
+        el.classList.add('rd-fading');
+        setTimeout(() => {
+          el.remove();
+          if (resolverDetailEl.children.length === 0) {
+            resolverDetailEl.classList.add('hidden');
+          }
+        }, 450);
+      }, 2000);
+    }
+  }
+}
+
+function resetResolverDetail() {
+  rdActiveRows.forEach(({ intervalId }) => clearInterval(intervalId));
+  rdActiveRows.clear();
+  resolverDetailEl.innerHTML = '';
+  resolverDetailEl.classList.add('hidden');
 }
 
 function handleStatus(payload) {
@@ -2802,23 +3681,27 @@ function handleStatus(payload) {
     if (debugPanelOpen && currentScanId) {
       fetch(API_BASE_URL + '/debug/' + currentScanId).then(r => r.ok ? r.json() : null).then(d => { if (d) updateDebugStats(d); }).catch(() => {});
     }
-    setSseStatus('idle');
+
+    if (status === 'completed') {
+      setSseStatus('complete');
+    } else {
+      setSseStatus('idle');
+    }
+
     scanBtn.disabled = false;
     demoBtn.disabled = false;
     stopBtn.classList.add('hidden');
     stopBtn.disabled = true;
     seedInput.disabled = false;
     emailHint.disabled = false;
-    if (eventSource) { eventSource.close(); eventSource = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+    showCompletionBanner(status, payload);
 
     if (status === 'completed' || status === 'cancelled') {
-      exportBtn.style.display = '';
-      exportBtn.href = API_BASE_URL + '/scan/' + currentScanId + '/graph/download';
-      exportBtn.download = `phantom-${currentScanId.slice(0, 8)}.json`;
-      // Show generating indicator only for completed scans (not cancelled)
+      exportWrap.style.display = nodesMap.size > 0 ? '' : 'none';
       if (!currentReport && status === 'completed') {
         reportGeneratingEl.style.display = '';
-        // REST fallback: try fetching report after a delay
         const fallbackScanId = currentScanId;
         setTimeout(() => {
           if (currentReport) return;
@@ -2833,10 +3716,64 @@ function handleStatus(payload) {
         }, 5000);
       }
       setTimeout(() => { resetNarrationFeed(); resetResolverProgress(); }, 4000);
-      // Auto-fit graph after simulation settles
       setTimeout(() => zoomToFit(60), 1800);
     }
   }
+}
+
+const completeBannerEl = document.getElementById('scan-complete-banner');
+
+function showCompletionBanner(status, payload) {
+  const nc = payload.node_count ?? nodesMap.size;
+  const ec = payload.edge_count ?? links.length;
+  const rc = payload.resolvers_completed ?? lastResolverProgress.completed;
+  const rf = payload.resolvers_failed ?? lastResolverProgress.failed;
+  const rt = payload.resolvers_total ?? lastResolverProgress.total;
+  const elapsed = elElapsed.textContent || '—';
+
+  let statusClass = '';
+  let label, statsHtml;
+
+  if (status === 'completed') {
+    label = 'SCAN COMPLETE';
+    const failedPart = rf > 0 ? ` <span class="banner-val" style="color:var(--error)">(${rf} failed)</span>` : '';
+    statsHtml = `— <span class="banner-val">${nc}</span> nodes · `
+      + `<span class="banner-val">${ec}</span> edges · `
+      + `<span class="banner-val">${rc}/${rt}</span> resolvers${failedPart} · `
+      + `<span class="banner-val">${elapsed}</span>`;
+  } else if (status === 'failed') {
+    statusClass = 'status-failed';
+    label = 'SCAN FAILED';
+    statsHtml = `— <span class="banner-val">${nc}</span> nodes · `
+      + `<span class="banner-val">${ec}</span> edges · `
+      + `<span class="banner-val">${rc}/${rt}</span> resolvers`;
+  } else {
+    statusClass = 'status-cancelled';
+    label = 'SCAN CANCELLED';
+    statsHtml = `— <span class="banner-val">${nc}</span> nodes · `
+      + `<span class="banner-val">${ec}</span> edges · `
+      + `<span class="banner-val">${rc}/${rt}</span> resolvers · `
+      + `<span class="banner-val">${elapsed}</span>`;
+  }
+
+  completeBannerEl.querySelector('.banner-label').textContent = label;
+  completeBannerEl.querySelector('.banner-stats').innerHTML = statsHtml;
+  completeBannerEl.className = statusClass;
+
+  if (nc > 0) {
+    elNodes.textContent = nc;
+  }
+  if (ec > 0) {
+    elEdges.textContent = ec;
+  }
+  if (rt > 0) {
+    elResolvers.textContent = `${rc}/${rt}`;
+  }
+}
+
+function hideCompletionBanner() {
+  completeBannerEl.classList.add('hidden');
+  completeBannerEl.className = 'hidden';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2946,6 +3883,7 @@ function resetReport() {
 //  NARRATION FEED
 // ════════════════════════════════════════════════════════════════════
 const narrationFeedEl = document.getElementById('narration-feed');
+const resolverStatusMsgEl = document.getElementById('resolver-status-msg');
 
 const NARRATION_ICONS = {
   start:      '◈',
@@ -2973,6 +3911,12 @@ function handleNarration(payload) {
   // Replace any existing message (single-line feed shows latest only)
   narrationFeedEl.innerHTML = '';
   narrationFeedEl.appendChild(msg);
+
+  // Mirror resolver-category narrations into the statsbar status message
+  if (category === 'resolver') {
+    resolverStatusMsgEl.textContent = payload.message;
+    resolverStatusMsgEl.classList.remove('hidden');
+  }
 }
 
 function resetNarrationFeed() {
@@ -3009,6 +3953,12 @@ function handleResolverProgress(payload) {
     rpFailedEl.textContent = '';
   }
 
+  // Clear the status message when nothing is active
+  if (lastResolverProgress.active === 0) {
+    resolverStatusMsgEl.textContent = '';
+    resolverStatusMsgEl.classList.add('hidden');
+  }
+
   updateStats();
 }
 
@@ -3019,6 +3969,8 @@ function resetResolverProgress() {
   rpFailedEl.textContent    = '';
   rpTotalEl.textContent     = '/ 0 total';
   resolverProgressEl.classList.add('hidden');
+  resolverStatusMsgEl.textContent = '';
+  resolverStatusMsgEl.classList.add('hidden');
 }
 </script>
 </body>
