@@ -1,102 +1,123 @@
-# Phantom — OSINT Intelligence Platform
+# Phantom
 
-**Phantom** is an autonomous OSINT (Open Source Intelligence) platform that reconstructs digital footprints from a single seed identifier. Given a username, email, phone number, domain, or crypto wallet address, Phantom's AI-driven planner–analyst loop discovers linked identities across hundreds of services, correlates them into a unified graph, and produces a structured intelligence report — all in real time.
+**Autonomous OSINT intelligence platform.** Give it a username, email, phone number, domain, or crypto wallet — it maps the entire digital footprint in real time.
+
+An AI planner-analyst loop drives the investigation: Claude selects which tools to run, resolvers execute in parallel across 600+ sites and breach databases, and a GPU post-processor extracts hidden connections. Results stream live to an interactive graph in the browser.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-## Features
+https://github.com/user-attachments/assets/placeholder
 
-- **Autonomous AI Agent Loop** — A Claude-powered planner selects investigation tools while an analyst synthesizes findings, iterating until the digital footprint is fully mapped.
-- **600+ Site Username Enumeration** — Checks username presence across ~600 platforms using the WhatsMyName dataset with async HTTP.
-- **Multi-Source Resolvers** — Dedicated resolvers for GitHub profiles, email verification (Kickbox, Hunter, Gravatar, HIBP, EmailRep), domain intelligence (crt.sh, WHOIS, DNS, SecurityTrails), breach databases (Dehashed, LeakCheck, BreachDirectory), social platforms (Reddit, Keybase, Hacker News, Stack Overflow, PGP), phone lookups (Numverify, Veriphone), and crypto wallets (Etherscan, Blockchain.com).
-- **GPU-Accelerated Entity Extraction** — Post-scan, a Qwen2.5-1.5B model running on an A10G GPU extracts additional emails, usernames, and domains from unstructured node metadata.
-- **Identity Correlation** — GPU-backed scoring links nodes that likely belong to the same person, with breach correlation matching shared password hashes, IPs, and phone numbers.
-- **Real-Time Streaming** — Server-Sent Events (SSE) push nodes, edges, analyst briefs, planner actions, and status updates to the frontend as the investigation unfolds.
-- **Interactive Graph Visualization** — D3.js force-directed graph with color-coded node types, correlation edges, identity cluster hulls, tooltips, and JSON export.
-- **Wave Pipelining** — An in-flight pool harvests completed resolvers without blocking, so the planner can continue with partial results.
-- **Scan Control** — Start, monitor, and cancel scans via REST API.
-- **Intelligence Reports** — Auto-generated reports covering identity profile, risk assessment, credential exposure, correlations, and recommendations.
-
-## Architecture
+## How It Works
 
 ```
-Seed Identifier
+Seed (username / email / phone / domain / wallet)
        │
        ▼
-   ┌────────┐     ┌──────────┐     ┌───────────┐
-   │ Planner│────▶│ Resolvers│────▶│  Analyst  │
-   │(Claude)│◀────│(parallel)│     │ (Claude)  │
-   └────────┘     └──────────┘     └───────────┘
-       │               │                 │
-       │          ┌────▼────┐            │
-       │          │  Modal  │            │
-       │          │  Dict   │◀───────────┘
-       │          └────┬────┘
-       │               │
-       ▼               ▼
-   ┌────────┐    ┌───────────┐    ┌──────────┐
-   │  GPU   │    │   Graph   │    │  Report  │
-   │Extract │───▶│  Builder  │───▶│Generator │
-   └────────┘    └───────────┘    └──────────┘
-                       │
-                       ▼
-                 ┌───────────┐
-                 │ Frontend  │
-                 │(D3 + SSE) │
-                 └───────────┘
+┌─────────────┐     ┌────────────────┐     ┌────────────┐
+│   Planner   │────▶│   Resolvers    │────▶│  Analyst   │
+│  (Claude)   │◀────│  (parallel)    │     │  (Claude)  │
+└─────────────┘     └────────────────┘     └────────────┘
+       │                    │                     │
+       │          ┌────────▼────────┐            │
+       │          │   Modal Dict    │◀───────────┘
+       │          │  (shared state) │
+       │          └────────┬────────┘
+       ▼                   ▼
+┌─────────────┐     ┌────────────┐     ┌────────────┐
+│  GPU Entity │────▶│   Graph    │────▶│  Report    │
+│  Extractor  │     │  Builder   │     │ Generator  │
+└─────────────┘     └────────────┘     └────────────┘
+                          │
+                          ▼
+                    ┌────────────┐
+                    │  Frontend  │
+                    │ (D3 + SSE) │
+                    └────────────┘
 ```
 
-1. A **seed** (username, email, etc.) is submitted via the API.
-2. The **Planner** (Claude Sonnet) selects which resolver tools to run based on accumulated briefs.
-3. **Resolvers** execute in parallel on Modal, writing discovered entities and edges to a per-scan Dict.
-4. The **Analyst** (Claude Sonnet) compresses raw resolver output into structured briefs for the next planning cycle.
-5. **Post-processing** runs GPU entity extraction, breach correlation, and identity correlation.
-6. A **Report Generator** produces the final intelligence report over the completed graph.
-7. The **Frontend** receives live updates via SSE and renders an interactive force-directed graph.
+1. A **seed entity** is submitted via the API or frontend.
+2. The **Planner** (Claude Sonnet) picks which resolver tools to run based on accumulated briefs.
+3. **Resolvers** execute concurrently on Modal, writing discovered entities and edges to a per-scan Dict.
+4. The **Analyst** (Claude Sonnet) compresses raw output into structured briefs for the next planning cycle.
+5. The loop repeats — the planner reads the brief, spawns more resolvers, harvests results without blocking.
+6. **GPU post-processing** runs entity extraction (Qwen 1.5B on A10G), breach correlation, and identity correlation.
+7. A **Report Generator** produces the final intelligence report.
+8. The **Frontend** receives live updates via SSE and renders an interactive force-directed graph.
+
+## Features
+
+**Intelligence Gathering**
+- 600+ site username enumeration (WhatsMyName dataset, async)
+- Email enrichment — Hunter.io, EmailRep, Gravatar, HIBP, Kickbox
+- Domain intelligence — crt.sh, WHOIS, DNS, SecurityTrails
+- Breach databases — Dehashed v2, LeakCheck, BreachDirectory
+- Social platforms — Reddit, Keybase, Hacker News, Stack Overflow, PGP
+- Phone lookups — Numverify, Veriphone
+- Crypto wallets — Etherscan (ETH), Blockchain.com (BTC)
+
+**AI Agent Loop**
+- Claude-powered planner selects investigation tools; analyst synthesizes findings
+- Wave pipelining — completed resolvers are harvested without blocking the planner
+- Parallel tool calls — all selected resolvers spawn concurrently
+
+**GPU Post-Processing**
+- Qwen2.5-1.5B on A10G extracts emails, usernames, domains from unstructured metadata
+- Identity correlation scores cross-platform profiles (emits `likely_same_person` edges at >= 0.75 confidence)
+- Breach correlation matches shared password hashes, IPs, and phone numbers
+
+**Frontend**
+- D3.js force-directed graph with color-coded node types and correlation edges
+- Real-time streaming via SSE as the investigation unfolds
+- Agent transcript panel showing planner/analyst reasoning
+- Downloadable intelligence reports and graph JSON export
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Compute | [Modal](https://modal.com) (serverless CPU + GPU) |
-| API | FastAPI |
-| LLM | Anthropic Claude (Sonnet 4, Haiku) |
-| GPU Inference | PyTorch, Transformers, Qwen2.5-1.5B-Instruct on A10G |
+| Compute | [Modal](https://modal.com) — serverless CPU + A10G GPU |
+| API | FastAPI (ASGI) |
+| LLM | Claude Sonnet 4.6 (planner/analyst), Haiku 4.5 (distiller) |
+| GPU Inference | Qwen2.5-1.5B-Instruct via PyTorch + Transformers |
 | Graph | NetworkX |
-| HTTP | requests, httpx, aiohttp |
-| Data Validation | Pydantic v2 |
 | Frontend | Vanilla JS, D3.js v7, Server-Sent Events |
+| Data | Pydantic v2, Modal Dict/Queue |
 
 ## Project Structure
 
 ```
-├── app.py                  # Modal app definition, image, secrets
-├── api.py                  # FastAPI endpoints
-├── orchestrator.py         # Planner–Analyst scan loop with InFlightPool
-├── models.py               # Pydantic data models
-├── graph.py                # NetworkX graph construction
-├── stream.py               # SSE event writer
-├── scan_log.py             # Per-scan activity logging
+├── app.py                     # Modal app, image, secrets
+├── api.py                     # FastAPI endpoints
+├── orchestrator.py            # Planner–Analyst loop, InFlightPool
+├── models.py                  # Pydantic data models
+├── graph.py                   # NetworkX graph build/serialize
+├── stream.py                  # SSE event writer
+├── scan_log.py                # Per-scan activity logging
 ├── agent/
-│   ├── planner.py          # Planner agent (tool selection)
-│   ├── analyst.py          # Analyst agent (brief synthesis)
-│   ├── tools.py            # Anthropic tool schemas for resolvers
-│   ├── report.py           # Intelligence report generator
-│   └── state.py            # Graph state tracking and diffs
+│   ├── planner.py             # Planner agent (tool selection)
+│   ├── analyst.py             # Analyst agent (brief synthesis)
+│   ├── tools.py               # Resolver tool schemas
+│   ├── report.py              # Intelligence report generator
+│   └── state.py               # Graph state tracking
 ├── resolvers/
-│   ├── username.py         # GitHub profile resolver
-│   ├── username_enum.py    # WhatsMyName 600+ site enumeration
-│   ├── email.py            # Email verification and enrichment
-│   ├── domain.py           # Domain intelligence (crt.sh, WHOIS, DNS)
-│   ├── breach.py           # Breach database lookups
-│   ├── social.py           # Social platform resolvers
-│   ├── phone.py            # Phone number lookups
-│   ├── wallet.py           # Crypto wallet analysis
-│   └── identity_correlator.py  # GPU-backed identity matching
+│   ├── username.py            # GitHub profile
+│   ├── username_enum.py       # WhatsMyName 600+ sites
+│   ├── email.py               # Email verification & enrichment
+│   ├── domain.py              # Domain intel (crt.sh, WHOIS, DNS)
+│   ├── breach.py              # Breach database lookups
+│   ├── social.py              # Reddit, Keybase, HN, SO, PGP
+│   ├── phone.py               # Phone number lookups
+│   ├── wallet.py              # Crypto wallet analysis
+│   └── identity_correlator.py # Identity matching
 ├── inference/
-│   └── extractor.py        # GPU entity extractor (Qwen2.5-1.5B)
+│   └── extractor.py           # GPU entity extractor (Qwen2.5-1.5B)
+├── telemetry/
+│   ├── exporter.py            # Telemetry collection
+│   ├── evaluator.py           # Scan scoring
+│   └── proposer.py            # Improvement proposals
 └── frontend/
-    └── index.html          # Single-page app (D3 graph + SSE)
+    └── index.html             # Single-page app (D3 graph + SSE)
 ```
 
 ## Setup
@@ -107,7 +128,7 @@ Seed Identifier
 - A [Modal](https://modal.com) account
 - An [Anthropic](https://console.anthropic.com) API key
 
-### Installation
+### Install
 
 ```bash
 git clone https://github.com/drPod/Phantom.git
@@ -118,11 +139,11 @@ modal setup
 
 ### API Keys
 
-Create a Modal secret named `osint-keys` with your API keys. In the Modal dashboard: **Secrets → Create → name `osint-keys`**, then add the relevant environment variables:
+Create a Modal secret named `osint-keys` with your API keys:
 
 | Variable | Service | Required |
 |----------|---------|----------|
-| `ANTHROPIC_API_KEY` | Anthropic Claude | Yes |
+| `ANTHROPIC_API_KEY` | Anthropic Claude | **Yes** |
 | `GITHUB_TOKEN` | GitHub API | Recommended |
 | `HUNTER_KEY` | Hunter.io | Optional |
 | `EMAILREP_KEY` | EmailRep.io | Optional |
@@ -134,44 +155,55 @@ Create a Modal secret named `osint-keys` with your API keys. In the Modal dashbo
 | `ETHERSCAN_KEY` | Etherscan | Optional |
 | `DEHASHED_KEY` | Dehashed | Optional |
 
-Most resolvers degrade gracefully when optional keys are missing — they simply skip that data source.
+Resolvers degrade gracefully when optional keys are missing — they skip that data source.
 
-## Usage
+### Deploy
 
-### Start the Server
+```bash
+modal deploy app.py
+```
+
+### Local Dev
 
 ```bash
 modal serve app.py
 ```
 
-This deploys the FastAPI app on Modal. Use the returned URL to access the API and frontend.
-
-### API Endpoints
+## API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/scan` | Start a scan. Body: `{"seed": {"type": "username", "value": "octocat"}}` |
-| `GET` | `/scan/{id}/status` | Scan status: `running`, `completed`, or `failed` |
-| `GET` | `/scan/{id}/graph` | Full graph JSON (`nodes` + `edges`) |
-| `GET` | `/scan/{id}/stream` | SSE stream of live scan events |
-| `GET` | `/scan/{id}/report` | Generated intelligence report |
+| `POST` | `/scan` | Start a scan |
+| `GET` | `/scan/{id}/status` | Scan status |
+| `GET` | `/scan/{id}/graph` | Full graph JSON |
+| `GET` | `/scan/{id}/events` | Poll for live events |
+| `GET` | `/scan/{id}/stream` | SSE stream |
+| `GET` | `/scan/{id}/report` | Intelligence report |
 | `GET` | `/scan/{id}/log` | Activity log |
-| `POST` | `/scan/{id}/stop` | Cancel a running scan |
+| `POST` | `/scan/{id}/stop` | Cancel a scan |
 
-### Frontend
+### Start a Scan
 
-Open the frontend `index.html` in a browser (or use the served URL) to access the interactive UI with:
+```bash
+curl -X POST https://your-modal-url/scan \
+  -H "Content-Type: application/json" \
+  -d '{"seed": {"type": "username", "value": "torvalds"}}'
+```
 
-- Real-time graph visualization as the scan progresses
-- Node details sidebar with full metadata
-- Agent transcript panel showing planner/analyst reasoning
-- Debug panel with resolver tracking and activity feed
-- Downloadable intelligence report
+### Demo Mode
+
+```bash
+curl -X POST https://your-modal-url/scan \
+  -H "Content-Type: application/json" \
+  -d '{"seed": {"type": "username", "value": "torvalds"}, "demo_mode": true}'
+```
+
+Demo mode caps at depth 1, 50 entities, 3 min timeout — finishes in ~2 minutes.
 
 ## Disclaimer
 
-This tool is intended for **authorized security research, penetration testing, and OSINT investigations only**. Users are responsible for ensuring compliance with all applicable laws and regulations. Do not use this tool to access systems or data without proper authorization.
+This tool is for **authorized security research, penetration testing, and OSINT investigations only**. Users are responsible for compliance with all applicable laws and regulations. Do not use this tool to access systems or data without proper authorization.
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
